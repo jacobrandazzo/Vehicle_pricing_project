@@ -6,6 +6,8 @@
 venv/
 __pycache__/
 *.pyc
+*.egg-info/
+build/
 
 # Data too large for git (vehicles_slim.csv.gz is tracked on purpose)
 vehicles.csv
