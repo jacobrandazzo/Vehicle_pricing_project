@@ -1,0 +1,22 @@
+# Secrets
+.env
+!.env.example
+
+# Python
+venv/
+__pycache__/
+*.pyc
+
+# Data too large for git (vehicles_slim.csv.gz is tracked on purpose)
+vehicles.csv
+
+# Generated plots
+plots/
+/fit.png
+/residuals.png
+
+# Windows and editor clutter
+Thumbs.db
+desktop.ini
+.vscode/
+.ipynb_checkpoints/
