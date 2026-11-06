@@ -5,7 +5,7 @@ reports a median price estimate with a prediction interval in dollars.
 
 Typical use (e.g. in a notebook, or as agent tools)::
 
-    from vehicle_pricing import load_vehicles, fit_query, estimate_price, plot_fit
+    from legacy_vehicle_pricing import load_vehicles, fit_query, estimate_price, plot_fit
 
     vehicles = load_vehicles("vehicles.csv")
 

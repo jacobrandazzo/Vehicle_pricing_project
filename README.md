@@ -66,7 +66,7 @@ This prints a sample Toyota estimate and plot details, and saves both plots. It 
 - `main.py`: the terminal chat, and the file you run
 - `agent.py`: sends your questions to Claude and runs the tools it asks for
 - `tools.py`: connects the agent to the price model and saves plots
-- `vehicle_pricing.py`: the price model and plotting functions
+- `legacy_vehicle_pricing.py`: the price model and plotting functions
 - `vehicles_slim.csv.gz`: the listings data (compressed, about 11 MB)
 - `requirements.txt`: the libraries to install
 - `.env.example`: a template for your `.env` file

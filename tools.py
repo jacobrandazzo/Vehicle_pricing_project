@@ -6,7 +6,7 @@ import matplotlib
 matplotlib.use("Agg")  # draw to files only; never try to open a window from inside the agent loop
 import matplotlib.pyplot as plt
 
-import vehicle_pricing as vp
+import legacy_vehicle_pricing as vp
 
 DATA_PATH = Path(__file__).parent / "vehicles_slim.csv.gz"
 PLOTS_DIR = Path(__file__).parent / "plots"
