@@ -6,9 +6,9 @@ import matplotlib
 matplotlib.use("Agg")  # draw to files only; never try to open a window from inside the agent loop
 import matplotlib.pyplot as plt
 
-import legacy_vehicle_pricing as vp
 from vehicle_pricing.data import check_manufacturer, filter_listings, load_data
 from vehicle_pricing.model import DEFAULT_ALPHA, fit_model, predict_price
+from vehicle_pricing.plots import plot_fit, plot_residuals
 from vehicle_pricing.schemas import VehicleQuery
 
 PLOTS_DIR = Path(__file__).parent / "plots"
@@ -116,16 +116,14 @@ def _make_plot(tool_name, query):
     PLOTS_DIR.mkdir(exist_ok=True)
 
     if tool_name == "plot_fit":
-        fig = vp.plot_fit(fit, subset["odometer"], subset["price"], title=title)
+        fig = plot_fit(subset, fit, title=title)
         path = PLOTS_DIR / "fit.png"
     else:
-        fig = vp.plot_residuals(
-            fit, subset["odometer"], subset["price"], title=f"{title}: residuals vs. odometer"
-        )
+        fig = plot_residuals(subset, fit, title=f"{title}: residuals vs. odometer")
         path = PLOTS_DIR / "residuals.png"
 
     fig.savefig(path, dpi=150, bbox_inches="tight")
-    plt.close("all")  # free memory (the fit plot is a seaborn grid with its own figure)
+    plt.close(fig)  # free the figure's memory; it has been saved
     return {"saved_to": str(path), "n_listings": fit.n, "r2": round(fit.r2, 3)}
 
 

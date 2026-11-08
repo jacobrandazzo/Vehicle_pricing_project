@@ -2,7 +2,7 @@
 
 Estimates a used car's price from its mileage, using Craigslist listings. It fits a curve of price against odometer and gives a typical price plus a 95% range.
 
-You ask questions in plain English in the terminal. A Claude agent picks out the details, runs the price model, and can save plots of the data it used.
+You describe a vehicle in plain English in the terminal. Claude picks out the details, then the price model runs and shows plots of the listings it used.
 
 ## Setup (once)
 
@@ -37,18 +37,17 @@ With the venv activated:
 python main.py
 ```
 
-Describe a vehicle and ask for a price or a plot, for example:
+Describe a vehicle, for example:
 
 ```
-> What's a 2015 Toyota Camry with 90,000 miles worth?
-> Now plot the listings
+> 2015 Toyota Camry, 90,000 miles
 ```
 
-A price estimate needs at least a manufacturer and a mileage. A plot needs at least a manufacturer. Follow-up questions work, and typing `quit` exits.
+It prints the estimated price and its 95% range, then opens two plot windows: the listings with the fitted curve (your vehicle marked on it), and the residuals. Close both windows to describe another vehicle; typing `quit` exits.
 
-Each question sends requests to the Anthropic API, which is billed to your API key.
+A description needs at least a make or model. Without a mileage you get the plots but no price. Follow-ups change the last vehicle: "what about 120k miles?", "make it a 2018", or "only manual ones". Describing a different vehicle ("now a Honda Civic") starts fresh.
 
-Plots are saved in the `plots` folder as `fit.png` (listings with the fitted curve) and `residuals.png`. Each new plot replaces the previous one of that type.
+Each description sends one request to the Anthropic API, which is billed to your API key.
 
 In VS Code, open this folder. If it asks, select the `venv` interpreter, then open `main.py` and press Run.
 
@@ -63,11 +62,14 @@ This prints a sample Toyota estimate and plot details, and saves both plots. It 
 
 ## Files
 
-- `main.py`: the terminal chat, and the file you run
-- `agent.py`: sends your questions to Claude and runs the tools it asks for
-- `tools.py`: connects the agent to the price model and saves plots
-- `legacy_vehicle_pricing.py`: the price model and plotting functions
+- `main.py`: the terminal app, and the file you run
+- `src/vehicle_pricing/agent.py`: asks Claude to turn a description into a `VehicleQuery`
+- `src/vehicle_pricing/schemas.py`: the `VehicleQuery` and `PriceResult` data shapes
 - `src/vehicle_pricing/data.py`: loads and cleans the listings, and filters them for a query
+- `src/vehicle_pricing/model.py`: fits the price curve and predicts a price with its range
+- `src/vehicle_pricing/plots.py`: the fit and residual plots
+- `agent.py`, `tools.py`: the older chat agent, no longer used by `main.py`; `tools.py` still runs the model offline (see above)
+- `make_baseline.py`: writes `baseline.txt` and `baseline_offline.txt`, reference results for checking changes
 - `data/vehicles_slim.csv.gz`: the listings data (compressed, about 11 MB)
 - `requirements.txt`: the libraries to install
 - `.env.example`: a template for your `.env` file

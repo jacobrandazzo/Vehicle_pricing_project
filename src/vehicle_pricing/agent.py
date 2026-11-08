@@ -31,15 +31,27 @@ _SYSTEM_PROMPT = """You extract used-vehicle details from a short description.
 - model is the model name in lowercase, e.g. "civic", "f-150".
 - A single model year sets both year_min and year_max to that year. A range like "1996-2000" sets year_min=1996 and year_max=2000.
 - odometer is the mileage in miles as a number: "90,000 miles" and "90k" are both 90000.
-- Leave out any field the description doesn't mention."""
+- Leave out any field the description doesn't mention.
+
+Follow-up messages:
+Sometimes the message comes with the current vehicle, from earlier in the conversation.
+- If the message changes the current vehicle (e.g. "what about 120k miles?", "make it a 2018",
+  "only manual ones"), return the full current vehicle with those changes applied.
+- If the message describes a different vehicle (e.g. "now a Honda Civic"), start fresh and
+  carry nothing over.
+- If the message removes a filter (e.g. "any year"), leave that field out."""
 
 
 class ParseError(Exception):
     """The description couldn't be turned into a valid VehicleQuery. str(e) is safe to show users."""
 
 
-def parse_description(text: str) -> VehicleQuery:
+def parse_description(text: str, previous: VehicleQuery | None = None) -> VehicleQuery:
     """Ask Claude to read a vehicle description and return it as a validated VehicleQuery.
+
+    Pass the last successful query as `previous` so follow-ups like "what about
+    120k miles?" update it instead of starting over. The result is always a
+    complete query, never just the changes.
 
     Raises ParseError with a short, user-friendly message if Claude doesn't return
     the fields, or returns fields that fail validation. API failures (network,
@@ -51,7 +63,7 @@ def parse_description(text: str) -> VehicleQuery:
         system=_SYSTEM_PROMPT,
         tools=[_TOOL],
         tool_choice={"type": "tool", "name": _TOOL_NAME},  # always answer with this tool
-        messages=[{"role": "user", "content": text}],
+        messages=[{"role": "user", "content": _user_message(text, previous)}],
     )
     print(response.usage)  # temporary: shows token counts for each call
 
@@ -75,6 +87,16 @@ def parse_description(text: str) -> VehicleQuery:
         return VehicleQuery.model_validate(tool_call.input)
     except ValidationError as e:
         raise ParseError(_friendly_message(e)) from e
+
+
+def _user_message(text: str, previous: VehicleQuery | None) -> str:
+    """The message sent to Claude: the user's text, plus the current vehicle if there is one."""
+    if previous is None:
+        return text
+    return (
+        f"<current_vehicle>{previous.model_dump_json(exclude_none=True)}</current_vehicle>\n"
+        f"<message>{text}</message>"
+    )
 
 
 def _friendly_message(error: ValidationError) -> str:
