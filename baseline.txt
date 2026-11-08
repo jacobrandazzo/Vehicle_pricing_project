@@ -1,4 +1,4 @@
-Baseline: full pipeline (Claude model claude-haiku-5-5)
+Baseline: full pipeline (parse_description via Claude)
 
 input: 2015 Camry, 90,000 miles
 parsed query: {'manufacturer': 'toyota', 'odometer': 90000.0, 'model': 'camry', 'year_min': 2015, 'year_max': 2015}

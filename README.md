@@ -12,7 +12,7 @@ You need Python 3.12 or newer ([python.org](https://www.python.org/downloads/)) 
 ```
 python -m venv venv
 venv\Scripts\activate
-pip install -r requirements.txt
+pip install -e .
 copy .env.example .env
 ```
 
@@ -20,7 +20,7 @@ copy .env.example .env
 ```
 python3 -m venv venv
 source venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 cp .env.example .env
 ```
 
@@ -43,7 +43,7 @@ Describe a vehicle, for example:
 > 2015 Toyota Camry, 90,000 miles
 ```
 
-It prints the estimated price and its 95% range, then opens two plot windows: the listings with the fitted curve (your vehicle marked on it), and the residuals. Close both windows to describe another vehicle; typing `quit` exits.
+It prints the estimated price and its 95% range, then opens two plot windows: the listings with the fitted curve (your vehicle marked on it), and the residuals. Close both windows to ask again; typing `quit` exits.
 
 A description needs at least a make or model. Without a mileage you get the plots but no price. Follow-ups change the last vehicle: "what about 120k miles?", "make it a 2018", or "only manual ones". Describing a different vehicle ("now a Honda Civic") starts fresh.
 
@@ -53,12 +53,12 @@ In VS Code, open this folder. If it asks, select the `venv` interpreter, then op
 
 ## Testing the model without the API
 
-To run the model and plots without calling Claude:
+To check the data and model without calling Claude:
 ```
-python tools.py
+python make_baseline.py --offline
 ```
 
-This prints a sample Toyota estimate and plot details, and saves both plots. It doesn't use your API key.
+This runs three fixed queries through filtering, fitting and prediction and writes the results to `baseline_offline.txt`. It doesn't use your API key. If you change the code and the file changes, the results changed.
 
 ## Files
 
@@ -68,10 +68,9 @@ This prints a sample Toyota estimate and plot details, and saves both plots. It 
 - `src/vehicle_pricing/data.py`: loads and cleans the listings, and filters them for a query
 - `src/vehicle_pricing/model.py`: fits the price curve and predicts a price with its range
 - `src/vehicle_pricing/plots.py`: the fit and residual plots
-- `agent.py`, `tools.py`: the older chat agent, no longer used by `main.py`; `tools.py` still runs the model offline (see above)
 - `make_baseline.py`: writes `baseline.txt` and `baseline_offline.txt`, reference results for checking changes
 - `data/vehicles_slim.csv.gz`: the listings data (compressed, about 11 MB)
-- `requirements.txt`: the libraries to install
+- `pyproject.toml`, `requirements.txt`: package settings and the libraries `pip install -e .` installs
 - `.env.example`: a template for your `.env` file
 
 `vehicles.csv`, the full 1.4 GB dataset, isn't in the repo and isn't needed to run the project.

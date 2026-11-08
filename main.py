@@ -1,4 +1,4 @@
-"""Terminal app: describe a vehicle, get a price estimate and see the plots."""
+"""Describe a vehicle, get a price estimate and see the plots. Follow-up questions work."""
 
 import matplotlib.pyplot as plt
 
@@ -14,9 +14,9 @@ def main():
     print("Loading listings...")
     vehicles = load_data()
     print(
-        "Vehicle price estimator. Describe a vehicle, e.g. '2015 Toyota Camry, 90,000 miles'. "
-        "Include the mileage for a price estimate. Follow-ups like 'what about 120k miles?' "
-        "change the last vehicle. Close the plot windows to ask again; type 'quit' to exit."
+        "Describe a vehicle, e.g. '2015 Toyota Camry, 90,000 miles'. Follow-ups like "
+        "'what about 120k miles?' change the last vehicle. Close the plot windows to "
+        "ask again; type 'quit' to exit."
     )
 
     previous = None  # last successful query, so follow-up questions can change it
@@ -33,13 +33,14 @@ def main():
             listings = filter_listings(vehicles, query)
             model = fit_model(listings)
             result = predict_price(model, query) if query.odometer is not None else None
-        except (ParseError, ValueError) as e:  # ValueError: unknown make, too few listings
-            print(e)  # `previous` is kept, so the user can rephrase the follow-up
-            print()
+        except ParseError as e:
+            print(f"Sorry, I couldn't use that description. {e}\n")
+            continue
+        except ValueError as e:  # unknown make, or too few matching listings
+            print(f"{e}\n")  # `previous` is kept, so the user can rephrase
             continue
         previous = query
 
-        title = " ".join(v for v in (query.manufacturer, query.model) if v).title()
         if result is None:
             print(f"No mileage given, so no price estimate. Showing {model.n:,} listings.")
         else:
@@ -52,6 +53,7 @@ def main():
                 print("Warning: that mileage is outside the range of the listings, "
                       "so this estimate is less reliable.")
 
+        title = " ".join(v for v in (query.manufacturer, query.model) if v).title()
         figures = [
             plot_fit(listings, model, result, title=title),
             plot_residuals(listings, model, title=f"{title}: residuals vs. odometer"),

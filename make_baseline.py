@@ -4,15 +4,14 @@
                                        # then the offline run -> baseline_offline.txt
     python make_baseline.py --offline  # only baseline_offline.txt (no API key needed)
 
-Online: each description goes through agent.answer(), exactly as main.py does.
-This script wraps two functions only while it runs: agent.run_tool, to record
-the arguments Claude sends, and tools.fit_model, to keep the fitted model so the
-lambdas can be written out. Neither changes behaviour. Prices come from
-predict_price(), which returns them unrounded.
+Online: each description goes through the same steps as main.py:
+parse_description() (calls Claude), then filter_listings(), fit_model() and
+predict_price(). Prices are written unrounded.
 
-Offline: the parsed queries in OFFLINE_QUERIES go straight into load_data(),
-filter_listings(), fit_model() and predict_price(), with no call to Claude. They should match what
-Claude parsed in the online run; the online run flags any difference.
+Offline: the parsed queries in OFFLINE_QUERIES skip parse_description() and go
+straight into filter_listings(), fit_model() and predict_price(), with no call
+to Claude. They should match what Claude parsed in the online run; the online
+run flags any difference.
 """
 
 import sys
@@ -64,61 +63,25 @@ def format_result(description, query, rows_after_cleaning, fit):
 
 
 def run_online():
-    """Send each description through the agent and record what it did."""
-    import agent  # imported here so --offline never needs an API key
-    import tools
+    """Run each description through the full pipeline, including Claude."""
+    from vehicle_pricing.agent import ParseError, parse_description  # needs an API key
 
-    tool_calls = []  # (name, input, fit or None) for every tool Claude asked for
-    fits = []  # every model fitted while a tool ran
-
-    original_run_tool = agent.run_tool
-    original_fit = tools.fit_model
-
-    def recording_run_tool(name, tool_input):
-        fits.clear()
-        result = original_run_tool(name, tool_input)
-        tool_calls.append((name, dict(tool_input), fits[-1] if fits else None))
-        return result
-
-    def recording_fit(*args, **kwargs):
-        fit = original_fit(*args, **kwargs)
-        fits.append(fit)
-        return fit
-
-    agent.run_tool = recording_run_tool
-    tools.fit_model = recording_fit
-
-    blocks = [f"Baseline: full pipeline (Claude model {agent.MODEL})"]
-    try:
-        for description in DESCRIPTIONS:
-            tool_calls.clear()
-            agent.answer(description, history=[])  # fresh conversation each time
-
-            estimates = [
-                (tools._build_query(tool_input), fit)
-                for name, tool_input, fit in tool_calls
-                if name == "estimate_price" and fit is not None
-            ]
-
-            if not estimates:
-                blocks.append(
-                    f"input: {description}\n"
-                    "NO PRICE ESTIMATE: Claude's tool calls were "
-                    f"{[(name, tool_input) for name, tool_input, _ in tool_calls]}"
-                )
-                continue
-
-            for query, fit in estimates:
-                block = format_result(description, query, len(tools.vehicles), fit)
-                if query != OFFLINE_QUERIES[description]:
-                    block += (
-                        "\nNOTE: differs from the offline query "
-                        f"{OFFLINE_QUERIES[description].model_dump(exclude_none=True)}"
-                    )
-                blocks.append(block)
-    finally:
-        agent.run_tool = original_run_tool
-        tools.fit_model = original_fit
+    vehicles = load_data()
+    blocks = ["Baseline: full pipeline (parse_description via Claude)"]
+    for description in DESCRIPTIONS:
+        try:
+            query = parse_description(description)
+        except ParseError as e:
+            blocks.append(f"input: {description}\nPARSE ERROR: {e}")
+            continue
+        fit = fit_model(filter_listings(vehicles, query))
+        block = format_result(description, query, len(vehicles), fit)
+        if query != OFFLINE_QUERIES[description]:
+            block += (
+                "\nNOTE: differs from the offline query "
+                f"{OFFLINE_QUERIES[description].model_dump(exclude_none=True)}"
+            )
+        blocks.append(block)
 
     ONLINE_FILE.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
     print(f"Wrote {ONLINE_FILE}")
