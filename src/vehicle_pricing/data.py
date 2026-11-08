@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import difflib
 import logging
 from datetime import date
 from pathlib import Path
@@ -72,6 +73,30 @@ def load_data(path: str | Path = DATA_PATH, **clean_kwargs: Any) -> pd.DataFrame
     """Read the listings CSV (only the columns we use) and clean it."""
     raw = pd.read_csv(path, usecols=lambda col: col in KEEP_COLUMNS)
     return clean_vehicles(raw, **clean_kwargs)
+
+
+class UnknownManufacturerError(ValueError):
+    """The query's manufacturer isn't in the listings. str(e) is safe to show users."""
+
+
+def check_manufacturer(df: pd.DataFrame, query: VehicleQuery) -> None:
+    """Raise UnknownManufacturerError unless the query's make appears in the listings.
+
+    Catches makes the parser got wrong or invented (e.g. "<unknown>" when the
+    description named no make), which would otherwise just match 0 listings.
+    """
+    known = df["manufacturer"].dropna().unique().tolist()
+    if query.manufacturer in known:
+        return
+    close = difflib.get_close_matches(query.manufacturer, known, n=3, cutoff=0.6)
+    if close:
+        raise UnknownManufacturerError(
+            f"I don't have listings for '{query.manufacturer}'. Did you mean {' or '.join(close)}?"
+        )
+    raise UnknownManufacturerError(
+        "I couldn't tell which make of vehicle that is. "
+        "Please include the make, e.g. 'Toyota Camry'."
+    )
 
 
 def filter_listings(df: pd.DataFrame, query: VehicleQuery) -> pd.DataFrame:

@@ -7,7 +7,7 @@ matplotlib.use("Agg")  # draw to files only; never try to open a window from ins
 import matplotlib.pyplot as plt
 
 import legacy_vehicle_pricing as vp
-from vehicle_pricing.data import filter_listings, load_data
+from vehicle_pricing.data import check_manufacturer, filter_listings, load_data
 from vehicle_pricing.model import DEFAULT_ALPHA, fit_model, predict_price
 from vehicle_pricing.schemas import VehicleQuery
 
@@ -154,6 +154,7 @@ def run_tool(tool_name, tool_input):
 
     try:
         query = _build_query(tool_input)
+        check_manufacturer(vehicles, query)  # UnknownManufacturerError is a ValueError
 
         if tool_name == "estimate_price":
             result = _estimate(query)
