@@ -22,3 +22,4 @@ Thumbs.db
 desktop.ini
 .vscode/
 .ipynb_checkpoints/
+.pytest_cache/
