@@ -38,10 +38,14 @@ class VehicleQuery(BaseModel):
         max_length=50,
         description="Make, e.g. 'toyota'. Text label, no units.",
     )
-    odometer: float = Field(
+    odometer: float | None = Field(
+        default=None,
         gt=0,
         le=MAX_ODOMETER_MILES,
-        description="Mileage of the vehicle being priced, in miles.",
+        description=(
+            "Mileage of the vehicle being priced, in miles. "
+            "Required for a price estimate; leave unset for plots."
+        ),
     )
     model: str | None = Field(
         default=None,
@@ -144,6 +148,13 @@ class PriceResult(BaseModel):
     query: VehicleQuery = Field(
         description="The query that produced this result. Units are set per field.",
     )
+
+    @model_validator(mode="after")
+    def check_query_has_odometer(self) -> Self:
+        """A price is always for a specific mileage, so the query must have one."""
+        if self.query.odometer is None:
+            raise ValueError("query.odometer must be set for a price result")
+        return self
 
     @model_validator(mode="after")
     def check_price_order(self) -> Self:

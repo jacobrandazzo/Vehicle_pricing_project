@@ -9,7 +9,7 @@ __pycache__/
 *.egg-info/
 build/
 
-# Data too large for git (vehicles_slim.csv.gz is tracked on purpose)
+# Data too large for git (data/vehicles_slim.csv.gz is tracked on purpose)
 vehicles.csv
 
 # Generated plots

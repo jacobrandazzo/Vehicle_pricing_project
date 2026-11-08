@@ -7,14 +7,13 @@ matplotlib.use("Agg")  # draw to files only; never try to open a window from ins
 import matplotlib.pyplot as plt
 
 import legacy_vehicle_pricing as vp
+from vehicle_pricing.data import filter_listings, load_data
+from vehicle_pricing.model import DEFAULT_ALPHA, fit_model, predict_price
+from vehicle_pricing.schemas import VehicleQuery
 
-DATA_PATH = Path(__file__).parent / "vehicles_slim.csv.gz"
 PLOTS_DIR = Path(__file__).parent / "plots"
 
-vehicles = vp.load_vehicles(DATA_PATH)
-
-# Filters that match a column exactly (case-insensitive). Claude may set any of these.
-CATEGORICAL_FILTERS = ("manufacturer", "model", "condition", "fuel", "transmission", "cylinders", "drive")
+vehicles = load_data()
 
 # Filter parameters shared by all three tools (everything except odometer).
 FILTER_PROPERTIES = {
@@ -85,34 +84,35 @@ tools = [
 ]
 
 
-def _range(low, high, name):
-    """Return (low, high) if either end is set, None if neither. Either end may be None."""
-    if low is None and high is None:
-        return None
-    if low is not None and high is not None and low > high:
-        raise ValueError(f"{name}_min cannot be greater than {name}_max")
-    return (low, high)
+def _build_query(tool_input):
+    """Turn Claude's tool arguments into a VehicleQuery (set fields only).
+
+    Temporary: Step 5 makes the agent return a VehicleQuery directly.
+    Raises pydantic.ValidationError (a ValueError) if the arguments are invalid.
+    """
+    fields = {
+        k: v for k, v in tool_input.items()
+        if k in VehicleQuery.model_fields and v is not None
+    }
+    return VehicleQuery(**fields)
 
 
-def _build_filters(tool_input):
-    """Turn Claude's tool arguments into filter_vehicles keyword arguments (set filters only)."""
-    filters = {k: tool_input[k] for k in CATEGORICAL_FILTERS if tool_input.get(k) is not None}
-    year_range = _range(tool_input.get("year_min"), tool_input.get("year_max"), "year")
-    if year_range is not None:
-        filters["year_range"] = year_range
-    return filters
+def _query_filters(query):
+    """The filters set on the query, for echoing back to Claude (odometer isn't a filter)."""
+    return query.model_dump(exclude_none=True, exclude={"odometer"})
 
 
-def _title(filters):
+def _title(query):
     """A short plot title built from the manufacturer and model."""
-    name = " ".join(str(filters[k]) for k in ("manufacturer", "model") if k in filters)
+    name = " ".join(v for v in (query.manufacturer, query.model) if v is not None)
     return name.title() or "Vehicles"
 
 
-def _make_plot(tool_name, filters):
-    """Fit the model for these filters, save the requested plot, and return a result dict."""
-    subset, fit = vp.fit_query(vehicles, **filters)
-    title = _title(filters)
+def _make_plot(tool_name, query):
+    """Fit the model for this query, save the requested plot, and return a result dict."""
+    subset = filter_listings(vehicles, query)
+    fit = fit_model(subset)
+    title = _title(query)
     PLOTS_DIR.mkdir(exist_ok=True)
 
     if tool_name == "plot_fit":
@@ -129,18 +129,36 @@ def _make_plot(tool_name, filters):
     return {"saved_to": str(path), "n_listings": fit.n, "r2": round(fit.r2, 3)}
 
 
+def _estimate(query):
+    """Fit the model for this query and return its price estimate as a JSON-friendly dict."""
+    if query.odometer is None:
+        raise ValueError("A price estimate needs the vehicle's mileage (odometer).")
+    fit = fit_model(filter_listings(vehicles, query))
+    price = predict_price(fit, query)
+    return {
+        "estimate": round(price.predicted_price, 2),
+        "lower": round(price.lower_bound, 2),
+        "upper": round(price.upper_bound, 2),
+        "interval_level": 1 - DEFAULT_ALPHA,
+        "n_listings": price.n_listings,
+        "r2": round(fit.r2, 3),
+        "extrapolated": price.extrapolated,
+        "filters": _query_filters(query),
+    }
+
+
 def run_tool(tool_name, tool_input):
     """Run a tool Claude asked for. Always returns a JSON string, even on failure."""
     if tool_name not in ("estimate_price", "plot_fit", "plot_residuals"):
         return json.dumps({"error": f"Unknown tool: {tool_name}"})
 
     try:
-        filters = _build_filters(tool_input)
+        query = _build_query(tool_input)
 
         if tool_name == "estimate_price":
-            result = vp.estimate_price(vehicles, tool_input["odometer"], **filters)
+            result = _estimate(query)
         else:
-            result = _make_plot(tool_name, filters)
+            result = _make_plot(tool_name, query)
 
         return json.dumps(result)
     except (ValueError, KeyError) as e:
