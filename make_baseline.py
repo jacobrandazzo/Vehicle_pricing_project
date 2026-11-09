@@ -1,4 +1,4 @@
-"""Record baseline results for three fixed vehicle descriptions.
+"""Record baseline results for four fixed vehicle descriptions.
 
     python make_baseline.py            # full pipeline (calls Claude) -> baseline.txt,
                                        # then the offline run -> baseline_offline.txt
@@ -29,6 +29,7 @@ DESCRIPTIONS = [
     "2015 Camry, 90,000 miles",
     "1996-2000 Honda Civic 200,000 miles",
     "2016 Toyota Tacoma, 120,000 miles",
+    "2015 Honda Accord",  # no mileage: the model is fitted, but there's no price
 ]
 
 # The parsed query for each description, used by the offline run.
@@ -42,24 +43,36 @@ OFFLINE_QUERIES = {
     "2016 Toyota Tacoma, 120,000 miles": VehicleQuery(
         manufacturer="toyota", model="tacoma", year_min=2016, year_max=2016, odometer=120000
     ),
+    "2015 Honda Accord": VehicleQuery(
+        manufacturer="honda", model="accord", year_min=2015, year_max=2015
+    ),
 }
 
 
 def format_result(description, query, rows_after_cleaning, fit):
-    """One block of the baseline file. Floats use repr(), so they're unrounded."""
-    price = predict_price(fit, query)
-    estimate, lower, upper = price.predicted_price, price.lower_bound, price.upper_bound
-    return "\n".join([
+    """One block of the baseline file. Floats use repr(), so they're unrounded.
+
+    Without a mileage there's no price, so only the fit is recorded (main.py
+    likewise shows only the plots in that case).
+    """
+    lines = [
         f"input: {description}",
         f"parsed query: {query.model_dump(exclude_none=True)}",
         f"rows after cleaning: {rows_after_cleaning}",
-        f"listings matched: {price.n_listings}",
+        f"listings matched: {fit.n}",
         f"box-cox lambda_x (odometer): {fit.lambda_x!r}",
         f"box-cox lambda_y (price): {fit.lambda_y!r}",
-        f"predicted price: {estimate!r}",
-        f"lower bound: {lower!r}",
-        f"upper bound: {upper!r}",
-    ])
+    ]
+    if query.odometer is None:
+        lines.append("predicted price: none (no mileage given)")
+    else:
+        price = predict_price(fit, query)
+        lines += [
+            f"predicted price: {price.predicted_price!r}",
+            f"lower bound: {price.lower_bound!r}",
+            f"upper bound: {price.upper_bound!r}",
+        ]
+    return "\n".join(lines)
 
 
 def run_online():

@@ -58,7 +58,7 @@ To check the data and model without calling Claude:
 python make_baseline.py --offline
 ```
 
-This runs three fixed queries through filtering, fitting and prediction and writes the results to `baseline_offline.txt`. It doesn't use your API key. If you change the code and the file changes, the results changed.
+This runs four fixed queries (one with no mileage) through filtering, fitting and prediction and writes the results to `baseline_offline.txt`. It doesn't use your API key. If you change the code and the file changes, the results changed.
 
 ## Files
 
