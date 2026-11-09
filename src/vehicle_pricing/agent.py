@@ -65,7 +65,6 @@ def parse_description(text: str, previous: VehicleQuery | None = None) -> Vehicl
         tool_choice={"type": "tool", "name": _TOOL_NAME},  # always answer with this tool
         messages=[{"role": "user", "content": _user_message(text, previous)}],
     )
-    print(response.usage)  # temporary: shows token counts for each call
 
     if response.stop_reason == "refusal":
         raise ParseError("Sorry, I can't help with that description.")
