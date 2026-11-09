@@ -29,3 +29,11 @@ box-cox lambda_y (price): 1.0
 predicted price: 26482.061375623944
 lower bound: 11430.327274565701
 upper bound: 41533.795476682186
+
+input: 2015 Honda Accord
+parsed query: {'manufacturer': 'honda', 'model': 'accord', 'year_min': 2015, 'year_max': 2015}
+rows after cleaning: 319543
+listings matched: 82
+box-cox lambda_x (odometer): 1.0
+box-cox lambda_y (price): 1.0
+predicted price: none (no mileage given)
