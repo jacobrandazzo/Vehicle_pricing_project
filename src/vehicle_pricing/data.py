@@ -23,7 +23,7 @@ DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "vehicles_slim.csv.gz
 KEEP_COLUMNS = frozenset({
     "price", "year", "manufacturer", "model", "odometer", "region", "state",
     "condition", "cylinders", "fuel", "title_status", "transmission",
-    "drive", "size", "type", "paint_color",
+    "drive", "size", "type", "paint_color", "posting_date",
 })
 
 # Rows that match on all of these are treated as duplicate postings.
@@ -31,6 +31,23 @@ DEDUP_COLUMNS = ["region", "year", "manufacturer", "model", "price", "odometer"]
 
 # VehicleQuery fields that match a column exactly (case-insensitive).
 CATEGORICAL_FIELDS = ("manufacturer", "model", "condition", "fuel", "transmission", "cylinders", "drive")
+
+
+def vehicle_age(posting_date: pd.Series, model_year: pd.Series) -> pd.Series:
+    """Return each vehicle's age in years (a decimal) on the day it was posted.
+
+    The posting date becomes a decimal year:
+    ``year + (day_of_year - 1) / days_in_that_year``, so 1 January 2021 is
+    2021.0 and 2 July 2021 is about 2021.5. The model year is treated as
+    1 January of that year. Age is the difference between the two.
+
+    The result is clipped at 0 because dealers list next year's models
+    early. A 2022 car posted in April 2021 would otherwise get an age of
+    about -0.7.
+    """
+    days_in_year = np.where(posting_date.dt.is_leap_year, 366, 365)
+    decimal_year = posting_date.dt.year + (posting_date.dt.dayofyear - 1) / days_in_year
+    return (decimal_year - model_year).clip(lower=0)
 
 
 def clean_vehicles(
@@ -46,9 +63,12 @@ def clean_vehicles(
     odometers (1, 999999), missing values and duplicate postings. The default
     ranges are conservative starting points -- tune them to your data.
     """
-    required = ["price", "odometer", "year"]
+    required = ["price", "odometer", "year", "posting_date"]
     out = df.dropna(subset=required).copy()
     out["year"] = out["year"].astype(int)
+    # Postings mix time-zone offsets (-0400, -0700, ...), so parse them all to UTC.
+    out["posting_date"] = pd.to_datetime(out["posting_date"], utc=True)
+    out["age"] = vehicle_age(out["posting_date"], out["year"])
 
     max_year = year_range[1] if year_range[1] is not None else date.today().year + 1
     keep = (
