@@ -145,4 +145,4 @@ It takes a few minutes, doesn't need an API key, and rewrites `docs/evaluation.m
 - `pyproject.toml`, `requirements.txt`: package settings and the libraries `pip install -e .` installs
 - `.env.example`: a template for your `.env` file
 
-`vehicles.csv`, the full 1.4 GB dataset, isn't in the repo and isn't needed to run the project. TODO(Jacob): credit the dataset source.
+`vehicles.csv`, the full 1.4 GB dataset, isn't in the repo and isn't needed to run the project. The listings come from the [Used Cars Dataset](https://www.kaggle.com/datasets/austinreese/craigslist-carstrucks-data) by Austin Reese on Kaggle (version 10), scraped from Craigslist: 426,880 listings posted in April–May 2021. The dataset has since been updated, so the current download differs; select version 10 in the dataset's version history to get the same file. `data/vehicles_slim.csv.gz` Keeps a subset of the columns.
