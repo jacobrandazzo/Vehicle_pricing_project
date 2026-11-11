@@ -19,6 +19,7 @@ from pathlib import Path
 
 from vehicle_pricing.data import comparison_years, filter_listings, load_data
 from vehicle_pricing.model import (
+    DEFAULT_FEATURES,
     car_model_year,
     depreciation_curves,
     drop_outliers,
@@ -63,8 +64,8 @@ def fit_listings(vehicles, query):
     Returns (listings matched, outliers dropped, fitted model).
     """
     matched = filter_listings(vehicles, query)
-    kept = drop_outliers(matched)
-    return len(matched), len(matched) - len(kept), fit_model(kept)
+    kept = drop_outliers(matched, features=DEFAULT_FEATURES)
+    return len(matched), len(matched) - len(kept), fit_model(kept, features=DEFAULT_FEATURES)
 
 
 def format_result(description, query, rows_after_cleaning, matched, dropped, fit):
@@ -84,7 +85,8 @@ def format_result(description, query, rows_after_cleaning, matched, dropped, fit
         f"box-cox lambda_x (odometer): {fit.lambda_x!r}",
         f"box-cox lambda_age (age + 1): {fit.lambda_age!r}",
         f"box-cox lambda_y (price): {fit.lambda_y!r}",
-        f"coefficients b0, b1 (odometer), b2 (age): {', '.join(repr(c) for c in fit.coef)}",
+        f"features used: {fit.features}",
+        f"coefficients ({', '.join(fit.columns)}): {', '.join(repr(c) for c in fit.coef)}",
         f"r-squared (transformed): {fit.r2!r}",
         f"car's age used (years): {query_age(fit, query)!r}",
         f"age effect t-stat: {curves.age_t_stat!r}",

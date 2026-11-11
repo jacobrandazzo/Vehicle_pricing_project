@@ -4,7 +4,13 @@ import matplotlib.pyplot as plt
 
 from vehicle_pricing.agent import ParseError, parse_description
 from vehicle_pricing.data import check_manufacturer, comparison_years, filter_listings, load_data
-from vehicle_pricing.model import depreciation_curves, drop_outliers, fit_model, predict_price
+from vehicle_pricing.model import (
+    DEFAULT_FEATURES,
+    depreciation_curves,
+    drop_outliers,
+    fit_model,
+    predict_price,
+)
 from vehicle_pricing.plots import plot_depreciation, plot_residuals
 
 QUIT_WORDS = ("quit", "exit", "done", "stop")
@@ -44,8 +50,9 @@ def main():
             query = parse_description(text, previous)
             check_manufacturer(vehicles, query)
             matched = filter_listings(vehicles, query)
-            listings = drop_outliers(matched)  # fits once to find prices far off the model
-            model = fit_model(listings)
+            # Fits once to find prices far off the model, then again without them.
+            listings = drop_outliers(matched, features=DEFAULT_FEATURES)
+            model = fit_model(listings, features=DEFAULT_FEATURES)
             result = predict_price(model, query) if query.odometer is not None else None
             curves = depreciation_curves(model, query)
         except ParseError as e:
@@ -74,6 +81,9 @@ def main():
             if result.extrapolated:
                 print("Warning: that mileage is unusual for a car of this age, so the "
                       "estimate leans on other model years and is less reliable.")
+
+        if "four_wd" in model.features and query.drive is None:
+            print("Drivetrain not given; price averaged over the 4WD/2WD mix in the listings.")
 
         if not curves.age_effect_clear:
             print(f"Note: these listings show no clear age effect (t = {curves.age_t_stat:.2f}), "

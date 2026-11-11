@@ -75,7 +75,8 @@ def main():
         query = VehicleQuery(manufacturer=make, model=model, year_min=YEAR_MIN, year_max=YEAR_MAX)
         listings = filter_listings(vehicles, query)
         plausible = pd.Series(
-            listings.index.isin(drop_outliers(listings).index), index=listings.index
+            listings.index.isin(drop_outliers(listings, max_passes=3).index),
+            index=listings.index,
         )
         sizes[car] = (len(listings), int(plausible.sum()))
         print(f"{car}: {len(listings):,} listings, {plausible.sum():,} plausible", flush=True)

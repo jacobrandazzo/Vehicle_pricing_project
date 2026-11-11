@@ -33,9 +33,15 @@ from vehicle_pricing.schemas import MIN_LISTINGS, PriceResult, VehicleQuery
 DEFAULT_ALPHA = 0.05  # 95% prediction interval
 BASE_COLUMNS = ("intercept", "odometer", "age")  # always in the model, in this order
 MIN_FEATURE_COUNT = 20  # a feature is skipped unless at least this many listings are 1 and 0
+# Features the app, baseline and figures use (fit_model and drop_outliers still default to
+# none). Chosen by 5-fold CV: they gave the lowest median % error (docs/evaluation.md).
+DEFAULT_FEATURES = ("clean_title", "four_wd")
 PROBLEM_TITLES = frozenset({"salvage", "rebuilt", "parts only", "missing"})
 MIN_AGE_SPREAD = 1.0  # years between the youngest and oldest listing needed to fit age
-OUTLIER_PASSES = 3  # most drop_outliers passes (fit, score, drop) before stopping
+# Default drop_outliers passes (fit, score, drop). 5-fold CV (docs/evaluation.md) showed
+# no real difference between 1 and 3 passes (at most 0.35 points of median % error), so
+# use the simpler one.
+OUTLIER_PASSES = 1
 CURVE_POINTS = 100  # points along each depreciation curve
 CLEAR_T_STAT = 2.0  # |t| at or above this counts as a clear age effect
 TYPICAL_YEAR_WINDOW = 1  # typical mileage for a model year uses listings within +/- this many years
@@ -356,11 +362,13 @@ def drop_outliers(
     200,000, so a fixed floor would either miss the first or throw away the
     second. The same goes for too-high dealer prices.
 
-    Why several passes: the first fit is made with the outliers still in,
-    and they pull it (e.g. towards a lambda_y on which they look less
+    Why allow several passes: the first fit is made with the outliers still
+    in, and they pull it (e.g. towards a lambda_y on which they look less
     extreme), so some survive. Refitting without the worst ones and scoring
     again catches more. It stops when a pass drops nothing, or after
-    max_passes, so it can't keep eating into real listings.
+    max_passes, so it can't keep eating into real listings. The default is
+    one pass (OUTLIER_PASSES): in cross-validation more passes didn't
+    improve predictions.
 
     Each pass fits with the given `features` (see fit_model).
 

@@ -5,19 +5,20 @@ parsed query: {'manufacturer': 'toyota', 'odometer': 90000.0, 'model': 'camry', 
 comparison years: (2010, 2020)
 rows after cleaning: 319543
 listings matched: 1129
-outliers dropped: 72
-box-cox lambda_x (odometer): 0.870133915657846
-box-cox lambda_age (age + 1): 0.457073412978488
-box-cox lambda_y (price): 0.5013798950213362
-coefficients b0, b1 (odometer), b2 (age): 370.28236723550924, -0.001838230373200923, -29.156574724266434
-r-squared (transformed): 0.891017870615307
-car's age used (years): 6.317808219178005
-age effect t-stat: -38.39122862425698
+outliers dropped: 63
+box-cox lambda_x (odometer): 0.6233099277116485
+box-cox lambda_age (age + 1): 0.2728151417669772
+box-cox lambda_y (price): 0.8473042380809246
+features used: ['clean_title']
+coefficients (intercept, odometer, age, clean_title): 7493.859240817961, -0.802093753207108, -1132.67829671958, 826.1176835250068
+r-squared (transformed): 0.8925547601931616
+car's age used (years): 6.319178082191684
+age effect t-stat: -37.19699161941848
 age effect clear: True
 typical mileage for this model year: (30210.700000000004, 146014.50000000006)
-predicted price: 13456.468018561944
-lower bound: 9831.472538190528
-upper bound: 17647.38956122188
+predicted price: 13597.94224202114
+lower bound: 9687.56693166429
+upper bound: 17690.093155123857
 extrapolated: False
 
 input: 1996-2000 Honda Civic 200,000 miles
@@ -29,7 +30,8 @@ outliers dropped: 0
 box-cox lambda_x (odometer): 2.0
 box-cox lambda_age (age + 1): -2.0
 box-cox lambda_y (price): -0.1205123648240082
-coefficients b0, b1 (odometer), b2 (age): 4.120371695524244, -6.657635655373633e-12, 2.056347427096247
+features used: []
+coefficients (intercept, odometer, age): 4.120371695524244, -6.657635655373633e-12, 2.056347427096247
 r-squared (transformed): 0.08911627006493905
 car's age used (years): 23.323287671232947
 age effect t-stat: 0.009920096515487552
@@ -45,19 +47,20 @@ parsed query: {'manufacturer': 'toyota', 'odometer': 120000.0, 'model': 'tacoma'
 comparison years: (2011, 2021)
 rows after cleaning: 319543
 listings matched: 1119
-outliers dropped: 22
-box-cox lambda_x (odometer): 0.764323628744104
-box-cox lambda_age (age + 1): 1.1945363853635746
-box-cox lambda_y (price): 0.9145412565249909
-coefficients b0, b1 (odometer), b2 (age): 19126.00447692308, -0.4046620606691884, -435.4623020206867
-r-squared (transformed): 0.6400614593764956
+outliers dropped: 19
+box-cox lambda_x (odometer): 0.7772489674463741
+box-cox lambda_age (age + 1): 1.2741541002853747
+box-cox lambda_y (price): 1.0334150291616981
+features used: ['clean_title', 'four_wd']
+coefficients (intercept, odometer, age, clean_title, four_wd): 46241.06105856098, -1.2198714586804695, -1129.5131032990666, 7784.026053105315, 7736.211031933743
+r-squared (transformed): 0.7424254417338414
 car's age used (years): 5.317808219178005
-age effect t-stat: -18.167843899590633
+age effect t-stat: -19.19688547836979
 age effect clear: True
-typical mileage for this model year: (19990.5, 148643.5)
-predicted price: 26558.948606710695
-lower bound: 16644.747167272675
-upper bound: 36807.32806599721
+typical mileage for this model year: (19991.45, 148607.85)
+predicted price: 26750.025381192005
+lower bound: 18083.37772490281
+upper bound: 35322.10636200341
 extrapolated: False
 
 input: 2015 Honda Accord
@@ -65,15 +68,16 @@ parsed query: {'manufacturer': 'honda', 'model': 'accord', 'year': 2015}
 comparison years: (2010, 2020)
 rows after cleaning: 319543
 listings matched: 1078
-outliers dropped: 47
-box-cox lambda_x (odometer): 0.8513589671428969
-box-cox lambda_age (age + 1): 0.704197083770395
-box-cox lambda_y (price): 0.45880269550680086
-coefficients b0, b1 (odometer), b2 (age): 260.1142237755179, -0.0015051208502387062, -12.906904806215179
-r-squared (transformed): 0.8471709754317838
+outliers dropped: 35
+box-cox lambda_x (odometer): 0.6756788535816316
+box-cox lambda_age (age + 1): 0.4627510634081896
+box-cox lambda_y (price): 0.7530019029766903
+features used: ['clean_title']
+coefficients (intercept, odometer, age, clean_title): 3176.804949655689, -0.18359858316475758, -351.6555128748596, 402.8549007668043
+r-squared (transformed): 0.8529729554555288
 car's age used (years): 6.32054794520559
-age effect t-stat: -33.07831942014803
+age effect t-stat: -32.980587560329894
 age effect clear: True
-typical mileage for this model year: (37736.55, 146552.85)
+typical mileage for this model year: (37456.9, 146400.79999999996)
 predicted price: none (no mileage given)
 extrapolated: n/a (no mileage given)

@@ -69,6 +69,7 @@ VARIANTS = [
     Variant("Mileage + age, 3 passes", outlier_passes=3),
     Variant("+ clean title", features=("clean_title",), outlier_passes=3),
     Variant("+ clean title + 4WD", features=("clean_title", "four_wd"), outlier_passes=3),
+    Variant("+ clean title + 4WD, 1 pass", features=("clean_title", "four_wd"), outlier_passes=1),
 ]
 
 
