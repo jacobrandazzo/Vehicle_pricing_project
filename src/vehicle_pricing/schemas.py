@@ -153,8 +153,11 @@ class PriceResult(BaseModel):
     )
     extrapolated: bool = Field(
         description=(
-            "True if the query's mileage is outside the mileage range of the "
-            "comparison listings, so the estimate is less reliable. True/false, no units."
+            "True if the estimate leans on cars unlike this one, so it is less reliable: "
+            "the mileage or age is outside the range of the comparison listings, or the "
+            "mileage is unusual for a car of this model year (outside the 5th-95th "
+            "percentile of listings within a year of it, or too few such listings). "
+            "True/false, no units."
         ),
     )
     query: VehicleQuery = Field(

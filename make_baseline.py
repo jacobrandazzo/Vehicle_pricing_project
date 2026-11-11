@@ -19,11 +19,13 @@ from pathlib import Path
 
 from vehicle_pricing.data import comparison_years, filter_listings, load_data
 from vehicle_pricing.model import (
+    car_model_year,
     depreciation_curves,
     drop_outliers,
     fit_model,
     predict_price,
     query_age,
+    typical_mileage_range,
 )
 from vehicle_pricing.schemas import VehicleQuery
 
@@ -87,15 +89,21 @@ def format_result(description, query, rows_after_cleaning, matched, dropped, fit
         f"car's age used (years): {query_age(fit, query)!r}",
         f"age effect t-stat: {curves.age_t_stat!r}",
         f"age effect clear: {curves.age_effect_clear}",
+        "typical mileage for this model year: "
+        f"{typical_mileage_range(fit, car_model_year(fit, query))!r}",
     ]
     if query.odometer is None:
-        lines.append("predicted price: none (no mileage given)")
+        lines += [
+            "predicted price: none (no mileage given)",
+            "extrapolated: n/a (no mileage given)",
+        ]
     else:
         price = predict_price(fit, query)
         lines += [
             f"predicted price: {price.predicted_price!r}",
             f"lower bound: {price.lower_bound!r}",
             f"upper bound: {price.upper_bound!r}",
+            f"extrapolated: {price.extrapolated}",
         ]
     return "\n".join(lines)
 

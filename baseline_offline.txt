@@ -14,9 +14,11 @@ r-squared (transformed): 0.891017870615307
 car's age used (years): 6.317808219178005
 age effect t-stat: -38.39122862425698
 age effect clear: True
+typical mileage for this model year: (30210.700000000004, 146014.50000000006)
 predicted price: 13456.468018561944
 lower bound: 9831.472538190528
 upper bound: 17647.38956122188
+extrapolated: False
 
 input: 1996-2000 Honda Civic 200,000 miles
 parsed query: {'manufacturer': 'honda', 'odometer': 200000.0, 'model': 'civic', 'year_min': 1996, 'year_max': 2000}
@@ -32,9 +34,11 @@ r-squared (transformed): 0.08911627006493905
 car's age used (years): 23.323287671232947
 age effect t-stat: 0.009920096515487552
 age effect clear: False
+typical mileage for this model year: (79950.0, 236300.0)
 predicted price: 2188.6408023104286
 lower bound: 840.9417555535073
 upper bound: 6453.32438885475
+extrapolated: False
 
 input: 2016 Toyota Tacoma, 120,000 miles
 parsed query: {'manufacturer': 'toyota', 'odometer': 120000.0, 'model': 'tacoma', 'year': 2016}
@@ -50,9 +54,11 @@ r-squared (transformed): 0.6400614593764956
 car's age used (years): 5.317808219178005
 age effect t-stat: -18.167843899590633
 age effect clear: True
+typical mileage for this model year: (19990.5, 148643.5)
 predicted price: 26558.948606710695
 lower bound: 16644.747167272675
 upper bound: 36807.32806599721
+extrapolated: False
 
 input: 2015 Honda Accord
 parsed query: {'manufacturer': 'honda', 'model': 'accord', 'year': 2015}
@@ -68,4 +74,6 @@ r-squared (transformed): 0.8471709754317838
 car's age used (years): 6.32054794520559
 age effect t-stat: -33.07831942014803
 age effect clear: True
+typical mileage for this model year: (37736.55, 146552.85)
 predicted price: none (no mileage given)
+extrapolated: n/a (no mileage given)

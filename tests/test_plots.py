@@ -3,15 +3,16 @@
 from matplotlib.figure import Figure
 
 from vehicle_pricing.model import depreciation_curves
-from vehicle_pricing.plots import plot_depreciation, plot_residuals
+from vehicle_pricing.plots import CURVE_COLOR, plot_depreciation, plot_residuals
 from vehicle_pricing.schemas import VehicleQuery
 
 CAMRY_2015_90K = VehicleQuery(manufacturer="toyota", model="camry", year=2015, odometer=90_000)
 
 
-def _age_curve_line(fig):
-    """The age curve: the red line in the right-hand panel."""
-    return fig.axes[1].get_lines()[0]
+def _age_curve_styles(fig):
+    """Line styles of the age curve's pieces (the curve-coloured lines in the right panel)."""
+    return {line.get_linestyle() for line in fig.axes[1].get_lines()
+            if line.get_color() == CURVE_COLOR}
 
 
 def test_plot_depreciation_with_mileage_returns_figure(camry_listings, camry_model):
@@ -21,7 +22,7 @@ def test_plot_depreciation_with_mileage_returns_figure(camry_listings, camry_mod
 
     assert isinstance(fig, Figure)
     assert len(fig.axes) >= 2
-    assert _age_curve_line(fig).get_linestyle() == "-"  # clear age effect: solid
+    assert "-" in _age_curve_styles(fig)  # clear age effect: solid where typical
 
 
 def test_plot_depreciation_without_mileage_returns_figure(camry_listings, camry_model):
@@ -42,7 +43,7 @@ def test_plot_depreciation_dashes_unclear_age_curve(camry_listings, camry_model)
 
     fig = plot_depreciation(camry_listings, curves, title="Toyota Camry")
 
-    assert _age_curve_line(fig).get_linestyle() == "--"
+    assert _age_curve_styles(fig) == {"--"}  # dashed everywhere
     notes = [t.get_text() for t in fig.axes[1].texts]
     assert any("No clear age effect" in note for note in notes)
 

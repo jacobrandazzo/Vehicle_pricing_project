@@ -8,12 +8,14 @@ import scipy.stats as stats
 from vehicle_pricing.data import vehicle_age
 from vehicle_pricing.model import (
     _half_width,
+    car_model_year,
     depreciation_curves,
     drop_outliers,
     fit_model,
     predict_interval,
     predict_price,
     query_age,
+    typical_mileage_range,
 )
 from vehicle_pricing.schemas import LATEST_MODEL_YEAR, VehicleQuery
 
@@ -169,3 +171,47 @@ def test_drop_outliers_keeps_everything_without_outliers(camry_listings):
     clean = camry_listings.assign(price=exact * rng.uniform(0.99, 1.01, size=len(exact)))
 
     assert len(drop_outliers(clean)) == len(clean)
+
+
+def test_typical_mileage_range_on_fixture(camry_model, camry_listings):
+    # 2015 has 2014-2016 around it: 12 listings, enough for a range.
+    low, high = typical_mileage_range(camry_model, 2015)
+    near = camry_listings[camry_listings["year"].between(2014, 2016)]["odometer"]
+
+    assert near.min() <= low < high <= near.max()
+    # 2010 has only 2010-2011 around it (8 listings), and 2030 has none.
+    assert typical_mileage_range(camry_model, 2010) is None
+    assert typical_mileage_range(camry_model, 2030) is None
+
+
+def test_typical_mileage_is_not_extrapolated_but_edge_of_overall_range_is(camry_model):
+    low, high = typical_mileage_range(camry_model, 2015)
+    typical = VehicleQuery(manufacturer="toyota", model="camry", year=2015,
+                           odometer=(low + high) / 2)
+    # The lowest mileage the model was fitted on: inside the overall range,
+    # but unusual for a 2015.
+    edge = typical.model_copy(update={"odometer": camry_model.odometer_min})
+    assert camry_model.odometer_min < low
+
+    assert not predict_price(camry_model, typical).extrapolated
+    assert predict_price(camry_model, edge).extrapolated
+
+
+def test_car_model_year_uses_year_or_rounded_range_midpoint(camry_model):
+    assert car_model_year(camry_model, VehicleQuery(manufacturer="toyota", year=2015)) == 2015
+    odd_range = VehicleQuery(manufacturer="toyota", year_min=2012, year_max=2015)
+    assert car_model_year(camry_model, odd_range) == 2014  # 2013.5 rounds up
+
+
+def test_every_curve_point_has_typical_and_car_is_typical(camry_model):
+    low, high = typical_mileage_range(camry_model, 2015)
+    query = CAMRY_2015_90K.model_copy(update={"odometer": (low + high) / 2})
+
+    curves = depreciation_curves(camry_model, query)
+
+    for curve in (curves.mileage_curve, curves.age_curve):
+        assert all(isinstance(point.typical, bool) for point in curve.points)
+    assert curves.car.typical is True
+    assert curves.typical_range == (low, high)
+    # The mileage curve covers more than the typical range, so some points aren't.
+    assert not all(point.typical for point in curves.mileage_curve.points)

@@ -72,8 +72,8 @@ def main():
                 f"based on {result.n_listings:,} listings ({years}){dropped_note}."
             )
             if result.extrapolated:
-                print("Warning: that mileage or age is outside the range of the listings, "
-                      "so this estimate is less reliable.")
+                print("Warning: that mileage is unusual for a car of this age, so the "
+                      "estimate leans on other model years and is less reliable.")
 
         if not curves.age_effect_clear:
             print(f"Note: these listings show no clear age effect (t = {curves.age_t_stat:.2f}), "

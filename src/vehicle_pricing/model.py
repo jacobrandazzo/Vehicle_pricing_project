@@ -30,6 +30,20 @@ MIN_AGE_SPREAD = 1.0  # years between the youngest and oldest listing needed to 
 OUTLIER_PASSES = 3  # most drop_outliers passes (fit, score, drop) before stopping
 CURVE_POINTS = 100  # points along each depreciation curve
 CLEAR_T_STAT = 2.0  # |t| at or above this counts as a clear age effect
+TYPICAL_YEAR_WINDOW = 1  # typical mileage for a model year uses listings within +/- this many years
+TYPICAL_PERCENTILES = (5, 95)  # the "typical" mileage band, as odometer percentiles
+MIN_TYPICAL_LISTINGS = 10  # fewer listings than this: no typical range for that model year
+
+
+class TypicalMileage(BaseModel):
+    """The usual mileage of listings around one model year."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    year: int  # model year
+    n: int  # listings with model year within +/- TYPICAL_YEAR_WINDOW of it
+    low: float  # 5th percentile odometer of those listings, in miles
+    high: float  # 95th percentile odometer, in miles
 
 
 class FittedModel(BaseModel):
@@ -55,6 +69,7 @@ class FittedModel(BaseModel):
     ref_year: float  # median posting date of the listings, as a decimal year
     r2: float  # R^2 in transformed space
     log_likelihood: float  # maximised Box-Cox profile log-likelihood
+    typical_mileage: list[TypicalMileage]  # one entry per model year in the listings
 
 
 def fit_model(
@@ -65,6 +80,8 @@ def fit_model(
     min_samples: int = MIN_LISTINGS,
 ) -> FittedModel:
     """Fit the model to the listings' 'odometer', 'age', 'price' and 'posting_date' columns.
+
+    The 'year' column is used only for typical_mileage (see _typical_mileage).
 
     The lambdas maximise the Box-Cox profile log-likelihood
 
@@ -138,6 +155,7 @@ def fit_model(
         ref_year=float(np.median(decimal_year(df["posting_date"]))),
         r2=float(1 - rss / np.sum((ty - ty.mean()) ** 2)),
         log_likelihood=_log_likelihood(x, a1, y, sum_log_y, lam_x, lam_age, lam_y),
+        typical_mileage=_typical_mileage(df),
     )
 
 
@@ -159,6 +177,38 @@ def query_age(model: FittedModel, query: VehicleQuery) -> float:
     else:
         return model.median_age
     return max(model.ref_year - year, 0.0)
+
+
+def car_model_year(model: FittedModel, query: VehicleQuery) -> int:
+    """The model year of the car being priced, chosen the same way as query_age.
+
+    query.year if set; otherwise the midpoint of the year range, rounded
+    (half up; an open end is ignored); otherwise the model year of a car of
+    the listings' median age.
+    """
+    if query.year is not None:
+        return query.year
+    if query.year_min is not None or query.year_max is not None:
+        ends = [y for y in (query.year_min, query.year_max) if y is not None]
+        return _round_half_up(sum(ends) / len(ends))
+    return _round_half_up(model.ref_year - model.median_age)
+
+
+def typical_mileage_range(model: FittedModel, model_year: int) -> tuple[float, float] | None:
+    """(low, high) usual odometer, in miles, for cars of this model year, or None.
+
+    It is the 5th to 95th percentile mileage of listings within +/- 1 model
+    year. None if the listings have no cars of that model year, or fewer than
+    MIN_TYPICAL_LISTINGS around it, so there is no reliable "usual" mileage.
+
+    Age and mileage go together (older cars have more miles), so the fitted
+    curves cover mileages that no car of a given age actually has. Outside
+    this range a curve's shape comes from other model years.
+    """
+    for entry in model.typical_mileage:
+        if entry.year == model_year:
+            return (entry.low, entry.high) if entry.n >= MIN_TYPICAL_LISTINGS else None
+    return None
 
 
 def drop_outliers(
@@ -221,11 +271,17 @@ def _within_robust_z(listings: pd.DataFrame, z: float) -> np.ndarray:
 def predict_price(
     model: FittedModel, query: VehicleQuery, alpha: float = DEFAULT_ALPHA
 ) -> PriceResult:
-    """Predict the median price at the query's mileage and age, with a 1 - alpha interval."""
+    """Predict the median price at the query's mileage and age, with a 1 - alpha interval.
+
+    The result is marked extrapolated if the mileage or age is outside what
+    the model was fitted on, or the mileage is unusual for the car's model
+    year (outside typical_mileage_range, or there is no range).
+    """
     if query.odometer is None:
         raise ValueError("A price prediction needs the vehicle's mileage (odometer).")
     age = query_age(model, query)
     estimate, lower, upper = predict_interval(model, query.odometer, age, alpha)
+    typical_range = typical_mileage_range(model, car_model_year(model, query))
     return PriceResult(
         predicted_price=float(estimate),
         lower_bound=float(lower),
@@ -234,6 +290,7 @@ def predict_price(
         extrapolated=not (
             model.odometer_min <= query.odometer <= model.odometer_max
             and model.age_min <= age <= model.age_max
+            and _is_typical(query.odometer, typical_range)
         ),
         query=query,
     )
@@ -273,6 +330,7 @@ class MileagePoint(BaseModel):
     price: float  # median price
     lower: float  # prediction interval
     upper: float
+    typical: bool  # odometer is inside the car's typical mileage range
 
 
 class AgePoint(BaseModel):
@@ -285,6 +343,7 @@ class AgePoint(BaseModel):
     price: float  # median price
     lower: float  # prediction interval
     upper: float
+    typical: bool  # the fixed odometer is inside the typical range for this model year
 
 
 class MileageCurve(BaseModel):
@@ -314,7 +373,7 @@ class AgeCurve(BaseModel):
 class CarPoint(BaseModel):
     """The car being priced, as a point on both curves.
 
-    The price fields are None when the query has no mileage.
+    The price fields and typical are None when the query has no mileage.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -325,6 +384,7 @@ class CarPoint(BaseModel):
     price: float | None
     lower: float | None
     upper: float | None
+    typical: bool | None  # odometer is inside the typical range for the car's model year
 
 
 class DepreciationCurves(BaseModel):
@@ -333,6 +393,10 @@ class DepreciationCurves(BaseModel):
     The mileage curve holds age at fixed_age (the car's own age). The age
     curve holds mileage at fixed_odometer: the car's mileage if the query has
     one (odometer_is_cars = True), otherwise the listings' median mileage.
+
+    Each point's `typical` flag says whether real cars like it exist in the
+    listings (see typical_mileage_range). Where it is False, the curve's
+    shape there is borrowed from other model years.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)
@@ -342,6 +406,7 @@ class DepreciationCurves(BaseModel):
     fixed_age: float  # years; age held constant along the mileage curve
     fixed_odometer: float  # miles; mileage held constant along the age curve
     odometer_is_cars: bool  # True: fixed_odometer is the car's; False: the median
+    typical_range: tuple[float, float] | None  # typical mileage for the car's model year
     car: CarPoint
     age_t_stat: float  # b2 divided by its standard error
     age_effect_clear: bool  # |age_t_stat| >= CLEAR_T_STAT
@@ -362,6 +427,11 @@ def depreciation_curves(
     Each curve has CURVE_POINTS evenly spaced points, each with the median
     price and its 1 - alpha prediction interval. Everything, including the car's own
     point, comes from predict_interval, so the car sits exactly on both curves.
+
+    Typical flags: a mileage-curve point is typical if its odometer is inside
+    the typical mileage range for the car's model year. An age-curve point is
+    typical if the fixed odometer is inside the typical range for that
+    point's model year (rounded to a whole year). No range means not typical.
 
     age_t_stat says how clearly the listings show an age effect once mileage
     is accounted for: the age coefficient b2 divided by its standard error.
@@ -384,21 +454,33 @@ def depreciation_curves(
     else:
         c_est = c_lo = c_hi = None
 
+    typical_range = typical_mileage_range(model, car_model_year(model, query))
+    mileage_typical = [_is_typical(o, typical_range) for o in miles]
+    age_typical = [
+        _is_typical(odometer, typical_mileage_range(model, _round_half_up(model.ref_year - a)))
+        for a in ages
+    ]
+
     b2_se = model.resid_se * np.sqrt(model.xtx_inv[2][2])
     t_stat = float(model.b2 / b2_se)
 
     return DepreciationCurves(
         mileage_curve=MileageCurve(points=[
-            MileagePoint(odometer=o, price=p, lower=lo, upper=hi)
-            for o, p, lo, hi in zip(miles.tolist(), m_est.tolist(), m_lo.tolist(), m_hi.tolist())
+            MileagePoint(odometer=o, price=p, lower=lo, upper=hi, typical=t)
+            for o, p, lo, hi, t in zip(
+                miles.tolist(), m_est.tolist(), m_lo.tolist(), m_hi.tolist(), mileage_typical
+            )
         ]),
         age_curve=AgeCurve(points=[
-            AgePoint(age=a, model_year=model.ref_year - a, price=p, lower=lo, upper=hi)
-            for a, p, lo, hi in zip(ages.tolist(), a_est.tolist(), a_lo.tolist(), a_hi.tolist())
+            AgePoint(age=a, model_year=model.ref_year - a, price=p, lower=lo, upper=hi, typical=t)
+            for a, p, lo, hi, t in zip(
+                ages.tolist(), a_est.tolist(), a_lo.tolist(), a_hi.tolist(), age_typical
+            )
         ]),
         fixed_age=age,
         fixed_odometer=float(odometer),
         odometer_is_cars=odometer_is_cars,
+        typical_range=typical_range,
         car=CarPoint(
             age=age,
             model_year=model.ref_year - age,
@@ -406,6 +488,7 @@ def depreciation_curves(
             price=c_est,
             lower=c_lo,
             upper=c_hi,
+            typical=_is_typical(odometer, typical_range) if odometer_is_cars else None,
         ),
         age_t_stat=t_stat,
         age_effect_clear=abs(t_stat) >= CLEAR_T_STAT,
@@ -441,6 +524,28 @@ def _half_width(
     """
     leverage = np.einsum("...i,ij,...j->...", x0, xtx_inv, x0)
     return stats.t.ppf(1 - alpha / 2, dof) * resid_se * np.sqrt(1 + leverage)
+
+
+def _typical_mileage(df: pd.DataFrame) -> list[TypicalMileage]:
+    """Typical mileage for each model year in the listings (see typical_mileage_range)."""
+    years = np.asarray(df["year"], dtype=int)
+    odometer = np.asarray(df["odometer"], dtype=float)
+    entries = []
+    for year in np.unique(years):
+        near = odometer[np.abs(years - year) <= TYPICAL_YEAR_WINDOW]
+        low, high = np.percentile(near, TYPICAL_PERCENTILES)
+        entries.append(TypicalMileage(year=int(year), n=near.size, low=float(low), high=float(high)))
+    return entries
+
+
+def _is_typical(odometer: float, typical_range: tuple[float, float] | None) -> bool:
+    """True if the odometer is inside the range; False if outside or there is no range."""
+    return bool(typical_range is not None and typical_range[0] <= odometer <= typical_range[1])
+
+
+def _round_half_up(x: float) -> int:
+    """Round to the nearest whole number, with .5 going up (Python's round() goes to even)."""
+    return int(np.floor(x + 0.5))
 
 
 def _model_design(model: FittedModel, odometer: ArrayLike, age: ArrayLike) -> np.ndarray:
