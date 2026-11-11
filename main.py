@@ -3,14 +3,8 @@
 import matplotlib.pyplot as plt
 
 from vehicle_pricing.agent import ParseError, parse_description
-from vehicle_pricing.data import check_manufacturer, comparison_years, filter_listings, load_data
-from vehicle_pricing.model import (
-    DEFAULT_FEATURES,
-    depreciation_curves,
-    drop_outliers,
-    fit_model,
-    predict_price,
-)
+from vehicle_pricing.data import comparison_years, load_data
+from vehicle_pricing.pipeline import estimate, warning_message
 from vehicle_pricing.plots import plot_depreciation, plot_residuals
 
 QUIT_WORDS = ("quit", "exit", "done", "stop")
@@ -48,13 +42,7 @@ def main():
 
         try:
             query = parse_description(text, previous)
-            check_manufacturer(vehicles, query)
-            matched = filter_listings(vehicles, query)
-            # Fits once to find prices far off the model, then again without them.
-            listings = drop_outliers(matched, features=DEFAULT_FEATURES)
-            model = fit_model(listings, features=DEFAULT_FEATURES)
-            result = predict_price(model, query) if query.odometer is not None else None
-            curves = depreciation_curves(model, query)
+            est = estimate(vehicles, query)
         except ParseError as e:
             print(f"Sorry, I couldn't use that description. {e}\n")
             continue
@@ -63,14 +51,15 @@ def main():
             continue
         previous = query
         years = describe_years(*comparison_years(query))
-        dropped = len(matched) - len(listings)
+        dropped = est.n_dropped
         plural = "" if dropped == 1 else "s"
         dropped_note = f" (dropped {dropped:,} unusual price{plural})" if dropped else ""
 
+        result = est.result
         if result is None:
             print(
                 "No mileage given, so no price estimate. "
-                f"Showing {model.n:,} listings ({years}){dropped_note}."
+                f"Showing {est.model.n:,} listings ({years}){dropped_note}."
             )
         else:
             print(
@@ -78,21 +67,15 @@ def main():
                 f"(95% range ${result.lower_bound:,.0f} to ${result.upper_bound:,.0f}), "
                 f"based on {result.n_listings:,} listings ({years}){dropped_note}."
             )
-            if result.extrapolated:
-                print("Warning: that mileage is unusual for a car of this age, so the "
-                      "estimate leans on other model years and is less reliable.")
 
-        if "four_wd" in model.features and query.drive is None:
-            print("Drivetrain not given; price averaged over the 4WD/2WD mix in the listings.")
-
-        if not curves.age_effect_clear:
-            print(f"Note: these listings show no clear age effect (t = {curves.age_t_stat:.2f}), "
-                  "so the age curve is only a rough guide.")
+        for code in est.warnings:  # already in display order
+            print(warning_message(code, est))
 
         title = " ".join(v for v in (query.manufacturer, query.model) if v).title()
         figures = [
-            plot_depreciation(listings, curves, title=title),
-            plot_residuals(listings, model, curves, title=f"{title}: residuals vs. odometer"),
+            plot_depreciation(est.listings, est.curves, title=title),
+            plot_residuals(est.listings, est.model, est.curves,
+                           title=f"{title}: residuals vs. odometer"),
         ]
         for fig in figures:
             plt.figure(fig)  # hand the figure to pyplot so plt.show() opens a window for it

@@ -5,29 +5,22 @@
     python make_baseline.py --offline  # only baseline_offline.txt (no API key needed)
 
 Online: each description goes through the same steps as main.py:
-parse_description() (calls Claude), then filter_listings(), drop_outliers(),
-fit_model() and predict_price(). Prices are written unrounded.
+parse_description() (calls Claude), then estimate() (see
+vehicle_pricing.pipeline), which filters the listings, drops outlier prices,
+fits the model, predicts the price and builds the curves. Prices are written
+unrounded.
 
 Offline: the parsed queries in OFFLINE_QUERIES skip parse_description() and go
-straight into filter_listings(), drop_outliers(), fit_model() and
-predict_price(), with no call to Claude. They should match what Claude parsed in the online run; the online
-run flags any difference.
+straight into estimate(), with no call to Claude. They should match what
+Claude parsed in the online run; the online run flags any difference.
 """
 
 import sys
 from pathlib import Path
 
-from vehicle_pricing.data import comparison_years, filter_listings, load_data
-from vehicle_pricing.model import (
-    DEFAULT_FEATURES,
-    car_model_year,
-    depreciation_curves,
-    drop_outliers,
-    fit_model,
-    predict_price,
-    query_age,
-    typical_mileage_range,
-)
+from vehicle_pricing.data import comparison_years, load_data
+from vehicle_pricing.model import car_model_year, query_age, typical_mileage_range
+from vehicle_pricing.pipeline import estimate
 from vehicle_pricing.schemas import VehicleQuery
 
 ROOT = Path(__file__).parent
@@ -58,30 +51,20 @@ OFFLINE_QUERIES = {
 }
 
 
-def fit_listings(vehicles, query):
-    """Filter, drop outlier prices, and fit: the same pipeline as main.py.
-
-    Returns (listings matched, outliers dropped, fitted model).
-    """
-    matched = filter_listings(vehicles, query)
-    kept = drop_outliers(matched, features=DEFAULT_FEATURES)
-    return len(matched), len(matched) - len(kept), fit_model(kept, features=DEFAULT_FEATURES)
-
-
-def format_result(description, query, rows_after_cleaning, matched, dropped, fit):
-    """One block of the baseline file. Floats use repr(), so they're unrounded.
+def format_result(description, rows_after_cleaning, est):
+    """One block of the baseline file, from an Estimate. Floats use repr(), so they're unrounded.
 
     Without a mileage there's no price, so only the fit is recorded (main.py
     likewise shows only the plots in that case).
     """
-    curves = depreciation_curves(fit, query)
+    query, fit, curves, price = est.query, est.model, est.curves, est.result
     lines = [
         f"input: {description}",
         f"parsed query: {query.model_dump(exclude_none=True)}",
         f"comparison years: {comparison_years(query)}",
         f"rows after cleaning: {rows_after_cleaning}",
-        f"listings matched: {matched}",
-        f"outliers dropped: {dropped}",
+        f"listings matched: {est.n_matched}",
+        f"outliers dropped: {est.n_dropped}",
         f"box-cox lambda_x (odometer): {fit.lambda_x!r}",
         f"box-cox lambda_age (age + 1): {fit.lambda_age!r}",
         f"box-cox lambda_y (price): {fit.lambda_y!r}",
@@ -94,13 +77,12 @@ def format_result(description, query, rows_after_cleaning, matched, dropped, fit
         "typical mileage for this model year: "
         f"{typical_mileage_range(fit, car_model_year(fit, query))!r}",
     ]
-    if query.odometer is None:
+    if price is None:
         lines += [
             "predicted price: none (no mileage given)",
             "extrapolated: n/a (no mileage given)",
         ]
     else:
-        price = predict_price(fit, query)
         lines += [
             f"predicted price: {price.predicted_price!r}",
             f"lower bound: {price.lower_bound!r}",
@@ -122,8 +104,7 @@ def run_online():
         except ParseError as e:
             blocks.append(f"input: {description}\nPARSE ERROR: {e}")
             continue
-        matched, dropped, fit = fit_listings(vehicles, query)
-        block = format_result(description, query, len(vehicles), matched, dropped, fit)
+        block = format_result(description, len(vehicles), estimate(vehicles, query))
         if query != OFFLINE_QUERIES[description]:
             block += (
                 "\nNOTE: differs from the offline query "
@@ -140,9 +121,8 @@ def run_offline():
     vehicles = load_data()
     blocks = ["Baseline: offline (no Claude; fixed parsed queries)"]
     for description in DESCRIPTIONS:
-        query = OFFLINE_QUERIES[description]
-        matched, dropped, fit = fit_listings(vehicles, query)
-        blocks.append(format_result(description, query, len(vehicles), matched, dropped, fit))
+        est = estimate(vehicles, OFFLINE_QUERIES[description])
+        blocks.append(format_result(description, len(vehicles), est))
 
     OFFLINE_FILE.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
     print(f"Wrote {OFFLINE_FILE}")
