@@ -10,8 +10,8 @@ import pandas as pd
 from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
 
-from vehicle_pricing.model import DEFAULT_ALPHA, FittedModel, predict_interval
-from vehicle_pricing.schemas import PriceResult
+from vehicle_pricing.model import DEFAULT_ALPHA, FittedModel, predict_interval, query_age
+from vehicle_pricing.schemas import PriceResult, VehicleQuery
 
 
 def plot_fit(
@@ -19,20 +19,28 @@ def plot_fit(
     model: FittedModel,
     result: PriceResult | None = None,
     *,
+    query: VehicleQuery | None = None,
     alpha: float = DEFAULT_ALPHA,
     title: str = "Price vs. odometer",
 ) -> Figure:
-    """Scatterplot of the listings with the fitted median and prediction interval.
+    """Scatterplot of price vs. odometer, with the fitted median and prediction interval.
 
-    If a PriceResult is given, its prediction is marked with its interval.
+    The curve holds age at the car's age (query_age). The car comes from
+    `query`, or from `result` if no query is given; with neither, the
+    listings' median age is used. If a PriceResult is given, its prediction
+    is marked with its interval.
     """
-    curve = _curve(model, alpha=alpha)
+    if query is None and result is not None:
+        query = result.query
+    age = query_age(model, query) if query is not None else model.median_age
+    curve = _curve(model, age, alpha=alpha)
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.scatter(listings["odometer"], listings["price"], s=6, alpha=0.25, label="Listings")
     ax.plot(
         curve["odometer"], curve["estimate"], color="red",
-        label=(f"Box-Cox fit (median), R² = {model.r2:.3f}  "
-               f"[λx = {model.lambda_x:.2f}, λy = {model.lambda_y:.2f}]"),
+        label=(f"Box-Cox fit (median) at age {age:.1f} years, R² = {model.r2:.3f}\n"
+               f"[λx = {model.lambda_x:.2f}, λa = {model.lambda_age:.2f}, "
+               f"λy = {model.lambda_y:.2f}]"),
     )
     ax.fill_between(
         curve["odometer"], curve["lower"], curve["upper"],
@@ -54,8 +62,12 @@ def plot_residuals(
     alpha: float = DEFAULT_ALPHA,
     title: str = "Residuals vs. odometer",
 ) -> Figure:
-    """Residuals (in dollars) against odometer, with the interval band."""
-    curve = _curve(model, alpha=alpha)
+    """Residuals (in dollars) of the full mileage-and-age model, against odometer.
+
+    Each listing's residual uses its own age. The band is the prediction
+    interval at the listings' median age.
+    """
+    curve = _curve(model, model.median_age, alpha=alpha)
     fig, ax = plt.subplots(figsize=(8, 6))
     ax.scatter(listings["odometer"], _residuals(listings, model), s=6, alpha=0.25)
     ax.axhline(0, color="red", linewidth=1)
@@ -63,7 +75,8 @@ def plot_residuals(
         curve["odometer"],
         curve["lower"] - curve["estimate"],
         curve["upper"] - curve["estimate"],
-        color="red", alpha=0.15, label=f"{1 - alpha:.0%} prediction interval",
+        color="red", alpha=0.15,
+        label=f"{1 - alpha:.0%} prediction interval at median age {model.median_age:.1f} years",
     )
     ax.set(title=title, xlabel="Odometer (miles)", ylabel="Residual ($)")
     ax.legend()
@@ -81,16 +94,18 @@ def _mark_prediction(ax, result: PriceResult) -> None:
     )
 
 
-def _curve(model: FittedModel, n_points: int = 100, alpha: float = DEFAULT_ALPHA) -> pd.DataFrame:
-    """Estimate and interval over the fitted odometer range."""
-    odometer = np.linspace(model.x_min, model.x_max, n_points)
-    estimate, lower, upper = predict_interval(model, odometer, alpha)
+def _curve(
+    model: FittedModel, age: float, n_points: int = 100, alpha: float = DEFAULT_ALPHA
+) -> pd.DataFrame:
+    """Estimate and interval over the fitted odometer range, with age held fixed."""
+    odometer = np.linspace(model.odometer_min, model.odometer_max, n_points)
+    estimate, lower, upper = predict_interval(model, odometer, age, alpha)
     return pd.DataFrame(
         {"odometer": odometer, "estimate": estimate, "lower": lower, "upper": upper}
     )
 
 
 def _residuals(listings: pd.DataFrame, model: FittedModel) -> np.ndarray:
-    """Actual price minus the fitted median price, in dollars."""
-    estimate, _, _ = predict_interval(model, listings["odometer"])
+    """Actual price minus the fitted median price (at each listing's mileage and age), in dollars."""
+    estimate, _, _ = predict_interval(model, listings["odometer"], listings["age"])
     return np.asarray(listings["price"], dtype=float) - estimate

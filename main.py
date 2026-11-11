@@ -72,7 +72,7 @@ def main():
 
         title = " ".join(v for v in (query.manufacturer, query.model) if v).title()
         figures = [
-            plot_fit(listings, model, result, title=title),
+            plot_fit(listings, model, result, query=query, title=title),
             plot_residuals(listings, model, title=f"{title}: residuals vs. odometer"),
         ]
         plt.show()  # opens both windows; returns when they are closed

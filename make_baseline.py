@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from vehicle_pricing.data import comparison_years, filter_listings, load_data
-from vehicle_pricing.model import fit_model, predict_price
+from vehicle_pricing.model import fit_model, predict_price, query_age
 from vehicle_pricing.schemas import VehicleQuery
 
 ROOT = Path(__file__).parent
@@ -62,7 +62,11 @@ def format_result(description, query, rows_after_cleaning, fit):
         f"rows after cleaning: {rows_after_cleaning}",
         f"listings matched: {fit.n}",
         f"box-cox lambda_x (odometer): {fit.lambda_x!r}",
+        f"box-cox lambda_age (age + 1): {fit.lambda_age!r}",
         f"box-cox lambda_y (price): {fit.lambda_y!r}",
+        f"coefficients b0, b1 (odometer), b2 (age): {fit.b0!r}, {fit.b1!r}, {fit.b2!r}",
+        f"r-squared (transformed): {fit.r2!r}",
+        f"car's age used (years): {query_age(fit, query)!r}",
     ]
     if query.odometer is None:
         lines.append("predicted price: none (no mileage given)")

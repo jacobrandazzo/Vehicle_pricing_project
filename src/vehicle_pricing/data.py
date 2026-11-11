@@ -45,9 +45,13 @@ def vehicle_age(posting_date: pd.Series, model_year: pd.Series) -> pd.Series:
     early. A 2022 car posted in April 2021 would otherwise get an age of
     about -0.7.
     """
-    days_in_year = np.where(posting_date.dt.is_leap_year, 366, 365)
-    decimal_year = posting_date.dt.year + (posting_date.dt.dayofyear - 1) / days_in_year
-    return (decimal_year - model_year).clip(lower=0)
+    return (decimal_year(posting_date) - model_year).clip(lower=0)
+
+
+def decimal_year(dates: pd.Series) -> pd.Series:
+    """Dates as decimal years: ``year + (day_of_year - 1) / days_in_that_year``."""
+    days_in_year = np.where(dates.dt.is_leap_year, 366, 365)
+    return dates.dt.year + (dates.dt.day_of_year - 1) / days_in_year
 
 
 def clean_vehicles(
