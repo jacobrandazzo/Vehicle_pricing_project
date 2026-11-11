@@ -27,6 +27,7 @@ from vehicle_pricing.schemas import MIN_LISTINGS, PriceResult, VehicleQuery
 DEFAULT_ALPHA = 0.05  # 95% prediction interval
 N_COEFS = 3  # b0, b1, b2
 MIN_AGE_SPREAD = 1.0  # years between the youngest and oldest listing needed to fit age
+OUTLIER_PASSES = 3  # most drop_outliers passes (fit, score, drop) before stopping
 CURVE_POINTS = 100  # points along each depreciation curve
 CLEAR_T_STAT = 2.0  # |t| at or above this counts as a clear age effect
 
@@ -160,6 +161,63 @@ def query_age(model: FittedModel, query: VehicleQuery) -> float:
     return max(model.ref_year - year, 0.0)
 
 
+def drop_outliers(
+    listings: pd.DataFrame, z: float = 3.5, max_passes: int = OUTLIER_PASSES
+) -> pd.DataFrame:
+    """Return a copy of the listings without those whose price is far off the fitted model.
+
+    The model is fitted to the listings. Each listing's residual r is
+    measured in transformed space (boxcox(price, lambda_y) minus the fitted
+    value), and scored with a robust z-score:
+
+        robust z = (r - median(r)) / (1.4826 * MAD),   MAD = median(|r - median(r)|)
+
+    Listings with |robust z| > z are dropped. (1.4826 * MAD equals the
+    standard deviation when residuals are normal, so z means roughly
+    "standard deviations".)
+
+    Why MAD-based: the mean and standard deviation of the residuals are
+    themselves dragged by the outliers they are meant to catch (a few $500
+    down-payment ads widen the standard deviation, so they look less
+    extreme). The median and MAD barely move.
+
+    Why relative, and not a price floor: a residual compares a listing with
+    what the model expects for its own mileage and age. $1,500 is wildly
+    low for a 2018 Camry with 40,000 miles but normal for a 1998 Civic with
+    200,000, so a fixed floor would either miss the first or throw away the
+    second. The same goes for too-high dealer prices.
+
+    Why several passes: the first fit is made with the outliers still in,
+    and they pull it (e.g. towards a lambda_y on which they look less
+    extreme), so some survive. Refitting without the worst ones and scoring
+    again catches more. It stops when a pass drops nothing, or after
+    max_passes, so it can't keep eating into real listings.
+
+    If MAD is 0 (most residuals identical), z can't be computed and that
+    pass drops nothing. fit_model's errors (too few listings, no age
+    spread) are raised as they are.
+    """
+    kept = listings
+    for _ in range(max_passes):
+        within = _within_robust_z(kept, z)
+        if within.all():
+            break
+        kept = kept[within]
+    return kept.copy()
+
+
+def _within_robust_z(listings: pd.DataFrame, z: float) -> np.ndarray:
+    """One pass of drop_outliers: True for listings with |robust z| <= z."""
+    model = fit_model(listings)
+    fitted = _model_design(model, listings["odometer"], listings["age"]) @ _coefs(model)
+    resid = boxcox(np.asarray(listings["price"], dtype=float), model.lambda_y) - fitted
+    centre = np.median(resid)
+    mad = np.median(np.abs(resid - centre))
+    if mad == 0:
+        return np.ones(len(listings), dtype=bool)
+    return np.abs((resid - centre) / (1.4826 * mad)) <= z
+
+
 def predict_price(
     model: FittedModel, query: VehicleQuery, alpha: float = DEFAULT_ALPHA
 ) -> PriceResult:
@@ -194,8 +252,8 @@ def predict_interval(
     odometer, age = np.broadcast_arrays(
         np.asarray(odometer, dtype=float), np.asarray(age, dtype=float)
     )
-    x0 = _design(boxcox(odometer, model.lambda_x), boxcox(age + 1, model.lambda_age))
-    y_hat = x0 @ np.array([model.b0, model.b1, model.b2])
+    x0 = _model_design(model, odometer, age)
+    y_hat = x0 @ _coefs(model)
     half_width = _half_width(
         x0, np.array(model.xtx_inv), model.resid_se, model.n - N_COEFS, alpha
     )
@@ -383,6 +441,18 @@ def _half_width(
     """
     leverage = np.einsum("...i,ij,...j->...", x0, xtx_inv, x0)
     return stats.t.ppf(1 - alpha / 2, dof) * resid_se * np.sqrt(1 + leverage)
+
+
+def _model_design(model: FittedModel, odometer: ArrayLike, age: ArrayLike) -> np.ndarray:
+    """Design rows [1, boxcox(odometer, lambda_x), boxcox(age + 1, lambda_age)] for a fitted model."""
+    odometer = np.asarray(odometer, dtype=float)
+    age = np.asarray(age, dtype=float)
+    return _design(boxcox(odometer, model.lambda_x), boxcox(age + 1, model.lambda_age))
+
+
+def _coefs(model: FittedModel) -> np.ndarray:
+    """The coefficients [b0, b1, b2] as an array."""
+    return np.array([model.b0, model.b1, model.b2])
 
 
 def _design(*predictors: np.ndarray) -> np.ndarray:

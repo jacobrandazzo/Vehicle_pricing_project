@@ -5,23 +5,25 @@ parsed query: {'manufacturer': 'toyota', 'odometer': 90000.0, 'model': 'camry', 
 comparison years: (2010, 2020)
 rows after cleaning: 319543
 listings matched: 1129
-box-cox lambda_x (odometer): 0.5608411065172756
-box-cox lambda_age (age + 1): 0.037160297881051976
-box-cox lambda_y (price): 1.0531732627644779
-coefficients b0, b1 (odometer), b2 (age): 60147.92254138607, -10.204219765384146, -13735.91514375732
-r-squared (transformed): 0.7684015478841109
-car's age used (years): 6.32054794520559
-age effect t-stat: -27.163926535500597
+outliers dropped: 72
+box-cox lambda_x (odometer): 0.870133915657846
+box-cox lambda_age (age + 1): 0.457073412978488
+box-cox lambda_y (price): 0.5013798950213362
+coefficients b0, b1 (odometer), b2 (age): 370.28236723550924, -0.001838230373200923, -29.156574724266434
+r-squared (transformed): 0.891017870615307
+car's age used (years): 6.317808219178005
+age effect t-stat: -38.39122862425698
 age effect clear: True
-predicted price: 13261.6982104434
-lower bound: 6746.0334635425925
-upper bound: 19603.837586480917
+predicted price: 13456.468018561944
+lower bound: 9831.472538190528
+upper bound: 17647.38956122188
 
 input: 1996-2000 Honda Civic 200,000 miles
 parsed query: {'manufacturer': 'honda', 'odometer': 200000.0, 'model': 'civic', 'year_min': 1996, 'year_max': 2000}
 comparison years: (1996, 2000)
 rows after cleaning: 319543
 listings matched: 92
+outliers dropped: 0
 box-cox lambda_x (odometer): 2.0
 box-cox lambda_age (age + 1): -2.0
 box-cox lambda_y (price): -0.1205123648240082
@@ -39,29 +41,31 @@ parsed query: {'manufacturer': 'toyota', 'odometer': 120000.0, 'model': 'tacoma'
 comparison years: (2011, 2021)
 rows after cleaning: 319543
 listings matched: 1119
-box-cox lambda_x (odometer): 0.6559450338834103
-box-cox lambda_age (age + 1): 0.9906219950982799
-box-cox lambda_y (price): 1.2821625814453457
-coefficients b0, b1 (odometer), b2 (age): 695040.4310069205, -57.222246694888, -26556.140102102432
-r-squared (transformed): 0.5382667438766834
+outliers dropped: 22
+box-cox lambda_x (odometer): 0.764323628744104
+box-cox lambda_age (age + 1): 1.1945363853635746
+box-cox lambda_y (price): 0.9145412565249909
+coefficients b0, b1 (odometer), b2 (age): 19126.00447692308, -0.4046620606691884, -435.4623020206867
+r-squared (transformed): 0.6400614593764956
 car's age used (years): 5.317808219178005
-age effect t-stat: -14.61526388214412
+age effect t-stat: -18.167843899590633
 age effect clear: True
-predicted price: 26631.9334932502
-lower bound: 13224.672038034749
-upper bound: 38282.172598021505
+predicted price: 26558.948606710695
+lower bound: 16644.747167272675
+upper bound: 36807.32806599721
 
 input: 2015 Honda Accord
 parsed query: {'manufacturer': 'honda', 'model': 'accord', 'year': 2015}
 comparison years: (2010, 2020)
 rows after cleaning: 319543
 listings matched: 1078
-box-cox lambda_x (odometer): 0.6652605143349978
-box-cox lambda_age (age + 1): -0.0836262875483599
-box-cox lambda_y (price): 1.0412082259092648
-coefficients b0, b1 (odometer), b2 (age): 59596.26581382041, -2.886077345152657, -16783.705359225303
-r-squared (transformed): 0.7529827004151439
+outliers dropped: 47
+box-cox lambda_x (odometer): 0.8513589671428969
+box-cox lambda_age (age + 1): 0.704197083770395
+box-cox lambda_y (price): 0.45880269550680086
+coefficients b0, b1 (odometer), b2 (age): 260.1142237755179, -0.0015051208502387062, -12.906904806215179
+r-squared (transformed): 0.8471709754317838
 car's age used (years): 6.32054794520559
-age effect t-stat: -26.355499814790242
+age effect t-stat: -33.07831942014803
 age effect clear: True
 predicted price: none (no mileage given)

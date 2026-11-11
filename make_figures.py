@@ -10,7 +10,7 @@ from pathlib import Path
 
 from make_baseline import OFFLINE_QUERIES
 from vehicle_pricing.data import filter_listings, load_data
-from vehicle_pricing.model import depreciation_curves, fit_model
+from vehicle_pricing.model import depreciation_curves, drop_outliers, fit_model
 from vehicle_pricing.plots import plot_depreciation
 
 DOCS = Path(__file__).parent / "docs"
@@ -27,7 +27,7 @@ def main():
     DOCS.mkdir(exist_ok=True)
     for description, (title, filename) in FIGURES.items():
         query = OFFLINE_QUERIES[description]
-        listings = filter_listings(vehicles, query)
+        listings = drop_outliers(filter_listings(vehicles, query))  # same pipeline as main.py
         curves = depreciation_curves(fit_model(listings), query)
         path = DOCS / filename
         plot_depreciation(listings, curves, title=title).savefig(path, dpi=DPI)

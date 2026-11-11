@@ -1,6 +1,7 @@
 """The prediction interval is built correctly and depreciation goes the right way."""
 
 import numpy as np
+import pandas as pd
 import pytest
 import scipy.stats as stats
 
@@ -8,6 +9,7 @@ from vehicle_pricing.data import vehicle_age
 from vehicle_pricing.model import (
     _half_width,
     depreciation_curves,
+    drop_outliers,
     fit_model,
     predict_interval,
     predict_price,
@@ -141,3 +143,29 @@ def test_age_effect_is_clear_on_fixture(camry_model):
 
     assert curves.age_effect_clear
     assert curves.age_t_stat < 0  # older means cheaper
+
+
+def test_drop_outliers_removes_planted_500_dollar_listings(camry_listings):
+    # Five "down-payment ads": real rows (spread over model years) re-priced at $500.
+    fake = camry_listings.iloc[[2, 11, 20, 29, 38]].assign(price=500.0)
+    fake.index = fake.index + 1000  # distinct labels, so we can tell them apart
+    listings = pd.concat([camry_listings, fake])
+
+    kept = drop_outliers(listings)
+
+    assert not kept.index.isin(fake.index).any()  # every fake one dropped
+    real_kept = kept.index.isin(camry_listings.index).sum()
+    assert real_kept >= 0.95 * len(camry_listings)
+
+
+def test_drop_outliers_keeps_everything_without_outliers(camry_listings):
+    # The fixture's exact price curve, with only +/-1% noise.
+    rng = np.random.default_rng(seed=2)
+    exact = (
+        30_000
+        * np.exp(-camry_listings["odometer"] / 150_000)
+        * np.exp(-0.08 * camry_listings["age"])
+    )
+    clean = camry_listings.assign(price=exact * rng.uniform(0.99, 1.01, size=len(exact)))
+
+    assert len(drop_outliers(clean)) == len(clean)

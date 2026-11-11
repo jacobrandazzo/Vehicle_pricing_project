@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 from vehicle_pricing.agent import ParseError, parse_description
 from vehicle_pricing.data import check_manufacturer, comparison_years, filter_listings, load_data
-from vehicle_pricing.model import depreciation_curves, fit_model, predict_price
+from vehicle_pricing.model import depreciation_curves, drop_outliers, fit_model, predict_price
 from vehicle_pricing.plots import plot_depreciation, plot_residuals
 
 QUIT_WORDS = ("quit", "exit", "done", "stop")
@@ -43,7 +43,8 @@ def main():
         try:
             query = parse_description(text, previous)
             check_manufacturer(vehicles, query)
-            listings = filter_listings(vehicles, query)
+            matched = filter_listings(vehicles, query)
+            listings = drop_outliers(matched)  # fits once to find prices far off the model
             model = fit_model(listings)
             result = predict_price(model, query) if query.odometer is not None else None
             curves = depreciation_curves(model, query)
@@ -55,17 +56,20 @@ def main():
             continue
         previous = query
         years = describe_years(*comparison_years(query))
+        dropped = len(matched) - len(listings)
+        plural = "" if dropped == 1 else "s"
+        dropped_note = f" (dropped {dropped:,} unusual price{plural})" if dropped else ""
 
         if result is None:
             print(
                 "No mileage given, so no price estimate. "
-                f"Showing {model.n:,} listings ({years})."
+                f"Showing {model.n:,} listings ({years}){dropped_note}."
             )
         else:
             print(
                 f"Estimated price: ${result.predicted_price:,.0f} "
                 f"(95% range ${result.lower_bound:,.0f} to ${result.upper_bound:,.0f}), "
-                f"based on {result.n_listings:,} listings ({years})."
+                f"based on {result.n_listings:,} listings ({years}){dropped_note}."
             )
             if result.extrapolated:
                 print("Warning: that mileage or age is outside the range of the listings, "
