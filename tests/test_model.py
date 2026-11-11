@@ -5,7 +5,14 @@ import pytest
 import scipy.stats as stats
 
 from vehicle_pricing.data import vehicle_age
-from vehicle_pricing.model import _half_width, fit_model, predict_price, query_age
+from vehicle_pricing.model import (
+    _half_width,
+    depreciation_curves,
+    fit_model,
+    predict_interval,
+    predict_price,
+    query_age,
+)
 from vehicle_pricing.schemas import LATEST_MODEL_YEAR, VehicleQuery
 
 
@@ -77,3 +84,60 @@ def test_fit_refuses_listings_all_from_one_model_year(camry_listings):
 
     with pytest.raises(ValueError, match="several model years"):
         fit_model(one_year)
+
+
+CAMRY_2015_90K = VehicleQuery(manufacturer="toyota", model="camry", year=2015, odometer=90_000)
+
+
+def test_depreciation_curves_fall_with_mileage_and_age(camry_model):
+    curves = depreciation_curves(camry_model, CAMRY_2015_90K)
+
+    mileage = curves.mileage_curve.to_frame()
+    age = curves.age_curve.to_frame()
+    assert mileage["odometer"].is_monotonic_increasing
+    assert mileage["price"].is_monotonic_decreasing
+    assert age["age"].is_monotonic_increasing
+    assert age["price"].is_monotonic_decreasing
+
+
+def test_car_sits_exactly_on_both_curves(camry_model):
+    curves = depreciation_curves(camry_model, CAMRY_2015_90K)
+    car = curves.car
+
+    # Each curve evaluated exactly at the car's value, not at the nearest grid point.
+    on_mileage_curve, _, _ = predict_interval(camry_model, car.odometer, curves.fixed_age)
+    on_age_curve, _, _ = predict_interval(camry_model, curves.fixed_odometer, car.age)
+
+    assert curves.fixed_age == car.age
+    assert curves.fixed_odometer == car.odometer
+    assert np.isclose(car.price, on_mileage_curve)
+    assert np.isclose(car.price, on_age_curve)
+    assert np.isclose(car.price, predict_price(camry_model, CAMRY_2015_90K).predicted_price)
+
+
+def test_curve_prices_lie_inside_their_intervals(camry_model):
+    curves = depreciation_curves(camry_model, CAMRY_2015_90K)
+
+    for frame in (curves.mileage_curve.to_frame(), curves.age_curve.to_frame()):
+        assert (frame["lower"] <= frame["price"]).all()
+        assert (frame["price"] <= frame["upper"]).all()
+    car = curves.car
+    assert car.lower <= car.price <= car.upper
+
+
+def test_without_mileage_age_curve_uses_median_and_car_has_no_price(camry_model):
+    query = CAMRY_2015_90K.model_copy(update={"odometer": None})
+
+    curves = depreciation_curves(camry_model, query)
+
+    assert curves.fixed_odometer == camry_model.median_odometer
+    assert not curves.odometer_is_cars
+    assert curves.car.odometer is None
+    assert curves.car.price is None and curves.car.lower is None and curves.car.upper is None
+
+
+def test_age_effect_is_clear_on_fixture(camry_model):
+    curves = depreciation_curves(camry_model, CAMRY_2015_90K)
+
+    assert curves.age_effect_clear
+    assert curves.age_t_stat < 0  # older means cheaper

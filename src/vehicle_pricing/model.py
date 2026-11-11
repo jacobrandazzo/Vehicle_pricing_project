@@ -10,6 +10,7 @@ positive inputs and a car can be 0 years old. The coefficients come from
 least squares. The three lambdas are chosen by maximising the Box-Cox profile
 log-likelihood (see fit_model). Predictions back-transform to dollars, so the
 estimate is a median price, with a prediction interval for a single listing.
+depreciation_curves returns price against mileage and against age, as data.
 """
 
 import numpy as np
@@ -26,6 +27,8 @@ from vehicle_pricing.schemas import MIN_LISTINGS, PriceResult, VehicleQuery
 DEFAULT_ALPHA = 0.05  # 95% prediction interval
 N_COEFS = 3  # b0, b1, b2
 MIN_AGE_SPREAD = 1.0  # years between the youngest and oldest listing needed to fit age
+CURVE_POINTS = 100  # points along each depreciation curve
+CLEAR_T_STAT = 2.0  # |t| at or above this counts as a clear age effect
 
 
 class FittedModel(BaseModel):
@@ -44,6 +47,7 @@ class FittedModel(BaseModel):
     n: int  # number of listings the model was fit on
     odometer_min: float  # odometer range fitted on, in miles
     odometer_max: float
+    median_odometer: float  # median mileage of the listings, in miles
     age_min: float  # age range fitted on, in years
     age_max: float
     median_age: float  # median age of the listings, in years
@@ -126,6 +130,7 @@ def fit_model(
         n=int(x.size),
         odometer_min=float(x.min()),
         odometer_max=float(x.max()),
+        median_odometer=float(np.median(x)),
         age_min=float(age.min()),
         age_max=float(age.max()),
         median_age=float(np.median(age)),
@@ -198,6 +203,151 @@ def predict_interval(
         boxcox_inverse(y_hat, model.lambda_y),
         boxcox_inverse(y_hat - half_width, model.lambda_y),
         boxcox_inverse(y_hat + half_width, model.lambda_y),
+    )
+
+
+class MileagePoint(BaseModel):
+    """One point on the mileage curve. Prices are in US dollars."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    odometer: float  # miles
+    price: float  # median price
+    lower: float  # prediction interval
+    upper: float
+
+
+class AgePoint(BaseModel):
+    """One point on the age curve. Prices are in US dollars."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    age: float  # years
+    model_year: float  # ref_year - age, a decimal year
+    price: float  # median price
+    lower: float  # prediction interval
+    upper: float
+
+
+class MileageCurve(BaseModel):
+    """Price against mileage, with age held fixed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    points: list[MileagePoint]
+
+    def to_frame(self) -> pd.DataFrame:
+        """The points as a DataFrame (columns odometer, price, lower, upper), for plotting."""
+        return pd.DataFrame([p.model_dump() for p in self.points])
+
+
+class AgeCurve(BaseModel):
+    """Price against age, with mileage held fixed."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    points: list[AgePoint]
+
+    def to_frame(self) -> pd.DataFrame:
+        """The points as a DataFrame (columns age, model_year, price, lower, upper), for plotting."""
+        return pd.DataFrame([p.model_dump() for p in self.points])
+
+
+class CarPoint(BaseModel):
+    """The car being priced, as a point on both curves.
+
+    The price fields are None when the query has no mileage.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    age: float  # years, from query_age
+    model_year: float  # ref_year - age, a decimal year
+    odometer: float | None  # miles, from the query
+    price: float | None
+    lower: float | None
+    upper: float | None
+
+
+class DepreciationCurves(BaseModel):
+    """How the fitted price changes with mileage and with age, for one car.
+
+    The mileage curve holds age at fixed_age (the car's own age). The age
+    curve holds mileage at fixed_odometer: the car's mileage if the query has
+    one (odometer_is_cars = True), otherwise the listings' median mileage.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    mileage_curve: MileageCurve
+    age_curve: AgeCurve
+    fixed_age: float  # years; age held constant along the mileage curve
+    fixed_odometer: float  # miles; mileage held constant along the age curve
+    odometer_is_cars: bool  # True: fixed_odometer is the car's; False: the median
+    car: CarPoint
+    age_t_stat: float  # b2 divided by its standard error
+    age_effect_clear: bool  # |age_t_stat| >= CLEAR_T_STAT
+
+
+def depreciation_curves(model: FittedModel, query: VehicleQuery) -> DepreciationCurves:
+    """Price curves for one car: against mileage, and against age. Data only, no plotting.
+
+    - Mileage curve: price over the fitted mileage range, with the car's age
+      held fixed, so it shows what extra miles alone cost this car.
+    - Age curve: price over the fitted age range, with mileage held fixed at
+      the car's mileage (or the listings' median mileage if the query has
+      none), so it shows what extra years alone cost.
+
+    Each curve has CURVE_POINTS evenly spaced points, each with the median
+    price and its prediction interval. Everything, including the car's own
+    point, comes from predict_interval, so the car sits exactly on both curves.
+
+    age_t_stat says how clearly the listings show an age effect once mileage
+    is accounted for: the age coefficient b2 divided by its standard error.
+    If |t| >= 2, the effect is about two standard errors or more from zero,
+    so it is unlikely to be just noise (roughly a 95% test), and
+    age_effect_clear is True. If |t| < 2, the age curve's slope may not mean
+    much: these listings can't separate age from mileage and noise.
+    """
+    age = query_age(model, query)
+    odometer_is_cars = query.odometer is not None
+    odometer = query.odometer if odometer_is_cars else model.median_odometer
+
+    miles = np.linspace(model.odometer_min, model.odometer_max, CURVE_POINTS)
+    m_est, m_lo, m_hi = predict_interval(model, miles, age)
+    ages = np.linspace(model.age_min, model.age_max, CURVE_POINTS)
+    a_est, a_lo, a_hi = predict_interval(model, odometer, ages)
+
+    if odometer_is_cars:
+        c_est, c_lo, c_hi = (float(v) for v in predict_interval(model, odometer, age))
+    else:
+        c_est = c_lo = c_hi = None
+
+    b2_se = model.resid_se * np.sqrt(model.xtx_inv[2][2])
+    t_stat = float(model.b2 / b2_se)
+
+    return DepreciationCurves(
+        mileage_curve=MileageCurve(points=[
+            MileagePoint(odometer=o, price=p, lower=lo, upper=hi)
+            for o, p, lo, hi in zip(miles.tolist(), m_est.tolist(), m_lo.tolist(), m_hi.tolist())
+        ]),
+        age_curve=AgeCurve(points=[
+            AgePoint(age=a, model_year=model.ref_year - a, price=p, lower=lo, upper=hi)
+            for a, p, lo, hi in zip(ages.tolist(), a_est.tolist(), a_lo.tolist(), a_hi.tolist())
+        ]),
+        fixed_age=age,
+        fixed_odometer=float(odometer),
+        odometer_is_cars=odometer_is_cars,
+        car=CarPoint(
+            age=age,
+            model_year=model.ref_year - age,
+            odometer=query.odometer,
+            price=c_est,
+            lower=c_lo,
+            upper=c_hi,
+        ),
+        age_t_stat=t_stat,
+        age_effect_clear=abs(t_stat) >= CLEAR_T_STAT,
     )
 
 

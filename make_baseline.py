@@ -18,7 +18,7 @@ import sys
 from pathlib import Path
 
 from vehicle_pricing.data import comparison_years, filter_listings, load_data
-from vehicle_pricing.model import fit_model, predict_price, query_age
+from vehicle_pricing.model import depreciation_curves, fit_model, predict_price, query_age
 from vehicle_pricing.schemas import VehicleQuery
 
 ROOT = Path(__file__).parent
@@ -55,6 +55,7 @@ def format_result(description, query, rows_after_cleaning, fit):
     Without a mileage there's no price, so only the fit is recorded (main.py
     likewise shows only the plots in that case).
     """
+    curves = depreciation_curves(fit, query)
     lines = [
         f"input: {description}",
         f"parsed query: {query.model_dump(exclude_none=True)}",
@@ -67,6 +68,8 @@ def format_result(description, query, rows_after_cleaning, fit):
         f"coefficients b0, b1 (odometer), b2 (age): {fit.b0!r}, {fit.b1!r}, {fit.b2!r}",
         f"r-squared (transformed): {fit.r2!r}",
         f"car's age used (years): {query_age(fit, query)!r}",
+        f"age effect t-stat: {curves.age_t_stat!r}",
+        f"age effect clear: {curves.age_effect_clear}",
     ]
     if query.odometer is None:
         lines.append("predicted price: none (no mileage given)")
