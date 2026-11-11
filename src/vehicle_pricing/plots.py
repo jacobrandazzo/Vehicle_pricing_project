@@ -8,6 +8,7 @@ then plt.show() in a script, or let a notebook display it.
 
 import numpy as np
 import pandas as pd
+from matplotlib import colormaps
 from matplotlib.colors import Normalize
 from matplotlib.figure import Figure
 from matplotlib.lines import Line2D
@@ -28,7 +29,12 @@ BAND_ALPHA = 0.15
 ATYPICAL_BAND_ALPHA = 0.06  # lighter band where few real cars are like the curve's point
 DASHED_NOTE = "Dashed: few cars like this;\nshape borrowed from other years"  # 2 lines: narrower legend
 YEAR_COLORMAP = "viridis"  # sequential: dark = older model years, yellow = newer
-YEAR_DOT_STYLE = {"s": 8, "alpha": 0.6, "linewidths": 0, "zorder": 1}
+HIGHLIGHT_DOT_STYLE = {"s": 8, "alpha": 1.0, "linewidths": 0, "zorder": 1.5}
+FADED_DOT_STYLE = {"s": 8, "color": "grey", "alpha": 0.25, "linewidths": 0, "zorder": 1}
+HIGHLIGHT_YEARS = 1  # left panel: highlight listings within +/- this many model years of the car
+HIGHLIGHT_MILEAGE = 0.2  # right panel: highlight listings within +/- 20% of the fixed odometer
+MILEAGE_AXIS_PERCENTILE = 99  # left panel's x-axis ends at this mileage percentile...
+MILEAGE_AXIS_STEP = 50_000  # ...rounded up to a multiple of this
 JITTER_YEARS = 0.3  # spreads listings of one model year sideways so they don't overlap
 JITTER_SEED = 0
 
@@ -52,11 +58,20 @@ def plot_depreciation(
     shape is borrowed from other model years. If the listings show no clear
     age effect, the whole age curve is dashed and the panel says so.
 
-    In both panels the listings are coloured by model year, with one shared
-    colour bar. They are drawn first, so the curve, band and car stay on top.
+    Each curve describes one slice of the model, so each panel highlights
+    the listings in that slice and fades the rest: on the left, cars within
+    +/- 1 model year of the car's; on the right, cars within +/- 20% of the
+    fixed mileage. Faded listings are grey. Highlighted ones are coloured by
+    model year, on one scale shared by both panels (one colour bar). All dots
+    are drawn first, faded under highlighted, so the curve, band and car stay
+    on top. The left x-axis stops at the 99th percentile mileage,
+    rounded up to the next 50,000, so a few very high-mileage cars don't
+    squash the plot.
 
-    `title` names the vehicle; the number of listings and their model years
-    are added. `alpha` defaults to the one the curves were computed with.
+    `title` names the vehicle (make, then model, e.g. "Toyota Camry"); the
+    legend uses the model for the highlighted cars, and the title adds the
+    number of listings fitted on and their model years. `alpha` defaults to
+    the one the curves were computed with.
     """
     alpha = _check_alpha(curves, alpha)
     band_label = f"{1 - alpha:.0%} prediction interval"
@@ -66,22 +81,34 @@ def plot_depreciation(
     fig = Figure(figsize=(13, 5.5), layout="constrained")
     ax_miles, ax_years = fig.subplots(1, 2, sharey=True)
     years = listings["year"]
-    dots = {"c": years, "cmap": YEAR_COLORMAP, "norm": Normalize(years.min(), years.max()),
-            "label": "Listings, colored by model year", **YEAR_DOT_STYLE}
+    norm = Normalize(years.min(), years.max())
+    cars = _plural_name(title)
 
-    # Left: price vs. mileage, at the car's age.
+    # Left: price vs. mileage, at the car's age; highlight cars near its model year.
     mileage = curves.mileage_curve.to_frame()
-    scatter = ax_miles.scatter(listings["odometer"], listings["price"], **dots)
+    near_year = (years - curves.car_year).abs() <= HIGHLIGHT_YEARS
+    low_year, high_year = curves.car_year - HIGHLIGHT_YEARS, curves.car_year + HIGHLIGHT_YEARS
+    miles_scatter, miles_dots = _highlighted_scatter(
+        ax_miles, listings["odometer"], listings["price"], years, near_year, norm,
+        f"{low_year}–{high_year} {cars} (highlighted)",
+    )
     miles_atypical = _draw_curve(ax_miles, mileage["odometer"], mileage)
     ax_miles.set(xlabel="Odometer (miles)", ylabel="Price")
     ax_miles.xaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
+    ax_miles.set_xlim(0, _mileage_axis_end(listings["odometer"], car.odometer))
 
     # Right: price vs. model year, at a fixed mileage.
     ages = curves.age_curve.to_frame()
     jitter = np.random.default_rng(JITTER_SEED).uniform(
         -JITTER_YEARS, JITTER_YEARS, size=len(listings)
     )
-    ax_years.scatter(years + jitter, listings["price"], **dots)
+    fixed = curves.fixed_odometer
+    near_miles = (listings["odometer"] - fixed).abs() <= HIGHLIGHT_MILEAGE * fixed
+    low_miles, high_miles = (1 - HIGHLIGHT_MILEAGE) * fixed, (1 + HIGHLIGHT_MILEAGE) * fixed
+    _, years_dots = _highlighted_scatter(
+        ax_years, years + jitter, listings["price"], years, near_miles, norm,
+        f"{cars} with {low_miles / 1000:.0f}k–{high_miles / 1000:.0f}k miles (highlighted)",
+    )
     whose = "this car's mileage" if curves.odometer_is_cars else "median mileage"
     years_atypical = _draw_curve(
         ax_years, ages["model_year"], ages, dashed_everywhere=not curves.age_effect_clear
@@ -112,7 +139,7 @@ def plot_depreciation(
     ax_miles.set_ylim(bottom=0)
     ax_miles.yaxis.set_major_formatter(DOLLARS)
     _legend(
-        ax_miles,
+        ax_miles, miles_dots,
         f"Median at age {curves.fixed_age:.1f} years ({car.model_year:.0f} model year)",
         band_label, curve_dashed=False, dashed_note=miles_atypical, loc="upper right",
     )
@@ -121,13 +148,13 @@ def plot_depreciation(
     # is dashed for that reason, so the "few cars like this" entry is left out.
     below_note = {} if curves.age_effect_clear else {"bbox_to_anchor": (0, 0.9)}
     _legend(
-        ax_years, f"Median at {curves.fixed_odometer:,.0f} miles ({whose})", band_label,
+        ax_years, years_dots, f"Median at {curves.fixed_odometer:,.0f} miles ({whose})", band_label,
         curve_dashed=not curves.age_effect_clear,
         dashed_note=years_atypical and curves.age_effect_clear,
         loc="upper left", **below_note,
     )
 
-    colorbar = fig.colorbar(scatter, ax=[ax_miles, ax_years], label="Model year")
+    colorbar = fig.colorbar(miles_scatter, ax=[ax_miles, ax_years], label="Model year")
     colorbar.locator = MaxNLocator(integer=True)  # whole years only, never "1998, 1998"
     colorbar.update_ticks()
     span = f"{years.min()}" if years.min() == years.max() else f"{years.min()}–{years.max()}"
@@ -189,24 +216,54 @@ def _draw_curve(ax, x: pd.Series, curve: pd.DataFrame, *, dashed_everywhere: boo
     return not typical.all()
 
 
-def _legend(ax, curve_label: str, band_label: str, *, curve_dashed: bool, dashed_note: bool,
-            **legend_kwargs) -> None:
-    """Legend: listings, curve, band, optional dashed-line note, then the car if marked.
+def _highlighted_scatter(ax, x, y, years, highlight, norm, label: str) -> tuple:
+    """Scatter faded listings in grey, then highlighted ones coloured by model year on top.
+
+    Returns the highlighted scatter (for the colour bar) and the legend items
+    [(handle, label)]; the highlighted entry uses a stand-in marker in one
+    mid-scale colour.
+    """
+    ax.scatter(x[~highlight], y[~highlight], **FADED_DOT_STYLE)
+    shown = ax.scatter(x[highlight], y[highlight], c=years[highlight],
+                       cmap=YEAR_COLORMAP, norm=norm, **HIGHLIGHT_DOT_STYLE)
+    swatch = {"marker": "o", "linestyle": "", "markersize": 5, "markeredgewidth": 0}
+    faded_swatch = {**swatch, "color": FADED_DOT_STYLE["color"], "alpha": FADED_DOT_STYLE["alpha"]}
+    return shown, [
+        (Line2D([], [], color=colormaps[YEAR_COLORMAP](0.5), **swatch), label),
+        (Line2D([], [], **faded_swatch), "Other listings (faded)"),
+    ]
+
+
+def _plural_name(title: str) -> str:
+    """'Toyota Camry' -> 'Camrys': the model (the title minus the make), made plural."""
+    words = title.split()
+    return " ".join(words[1:] if len(words) > 1 else words) + "s"
+
+
+def _mileage_axis_end(odometer: pd.Series, car_odometer: float | None) -> float:
+    """99th percentile mileage (or the car's, if higher), rounded up to the next 50,000."""
+    end = np.percentile(odometer, MILEAGE_AXIS_PERCENTILE)
+    if car_odometer is not None:
+        end = max(end, car_odometer)
+    return float(np.ceil(end / MILEAGE_AXIS_STEP) * MILEAGE_AXIS_STEP)
+
+
+def _legend(ax, dot_items: list, curve_label: str, band_label: str, *, curve_dashed: bool,
+            dashed_note: bool, **legend_kwargs) -> None:
+    """Legend: highlighted and faded listings, curve, band, dashed-line note, then the car.
 
     The curve is drawn in pieces, so its entries are stand-in handles.
     """
-    handles, labels = ax.get_legend_handles_labels()  # the listings, and the car if marked
-    entries = dict(zip(labels, handles))
-    listings_label = next(label for label in labels if label.startswith("Listings"))
+    handles, labels = ax.get_legend_handles_labels()  # only the car, if marked
     items = [
-        (entries.pop(listings_label), listings_label),
+        *dot_items,
         (Line2D([], [], color=CURVE_COLOR, linewidth=2,
                 linestyle="--" if curve_dashed else "-"), curve_label),
         (Patch(color=BAND_COLOR, alpha=BAND_ALPHA, linewidth=0), band_label),
     ]
     if dashed_note:
         items.append((Line2D([], [], color=CURVE_COLOR, linewidth=2, linestyle="--"), DASHED_NOTE))
-    items += [(handle, label) for label, handle in entries.items()]
+    items += list(zip(handles, labels))
     ax.legend(*zip(*items), fontsize=9, **legend_kwargs)
 
 

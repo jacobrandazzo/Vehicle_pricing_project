@@ -406,6 +406,7 @@ class DepreciationCurves(BaseModel):
     fixed_age: float  # years; age held constant along the mileage curve
     fixed_odometer: float  # miles; mileage held constant along the age curve
     odometer_is_cars: bool  # True: fixed_odometer is the car's; False: the median
+    car_year: int  # the car's model year, from car_model_year
     typical_range: tuple[float, float] | None  # typical mileage for the car's model year
     car: CarPoint
     age_t_stat: float  # b2 divided by its standard error
@@ -454,7 +455,8 @@ def depreciation_curves(
     else:
         c_est = c_lo = c_hi = None
 
-    typical_range = typical_mileage_range(model, car_model_year(model, query))
+    car_year = car_model_year(model, query)
+    typical_range = typical_mileage_range(model, car_year)
     mileage_typical = [_is_typical(o, typical_range) for o in miles]
     age_typical = [
         _is_typical(odometer, typical_mileage_range(model, _round_half_up(model.ref_year - a)))
@@ -480,6 +482,7 @@ def depreciation_curves(
         fixed_age=age,
         fixed_odometer=float(odometer),
         odometer_is_cars=odometer_is_cars,
+        car_year=car_year,
         typical_range=typical_range,
         car=CarPoint(
             age=age,
