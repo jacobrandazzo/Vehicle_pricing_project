@@ -4,8 +4,8 @@ import matplotlib.pyplot as plt
 
 from vehicle_pricing.agent import ParseError, parse_description
 from vehicle_pricing.data import check_manufacturer, comparison_years, filter_listings, load_data
-from vehicle_pricing.model import fit_model, predict_price
-from vehicle_pricing.plots import plot_fit, plot_residuals
+from vehicle_pricing.model import depreciation_curves, fit_model, predict_price
+from vehicle_pricing.plots import plot_depreciation, plot_residuals
 
 QUIT_WORDS = ("quit", "exit", "done", "stop")
 
@@ -46,6 +46,7 @@ def main():
             listings = filter_listings(vehicles, query)
             model = fit_model(listings)
             result = predict_price(model, query) if query.odometer is not None else None
+            curves = depreciation_curves(model, query)
         except ParseError as e:
             print(f"Sorry, I couldn't use that description. {e}\n")
             continue
@@ -67,14 +68,20 @@ def main():
                 f"based on {result.n_listings:,} listings ({years})."
             )
             if result.extrapolated:
-                print("Warning: that mileage is outside the range of the listings, "
+                print("Warning: that mileage or age is outside the range of the listings, "
                       "so this estimate is less reliable.")
+
+        if not curves.age_effect_clear:
+            print(f"Note: these listings show no clear age effect (t = {curves.age_t_stat:.2f}), "
+                  "so the age curve is only a rough guide.")
 
         title = " ".join(v for v in (query.manufacturer, query.model) if v).title()
         figures = [
-            plot_fit(listings, model, result, query=query, title=title),
-            plot_residuals(listings, model, title=f"{title}: residuals vs. odometer"),
+            plot_depreciation(listings, curves, title=title),
+            plot_residuals(listings, model, curves, title=f"{title}: residuals vs. odometer"),
         ]
+        for fig in figures:
+            plt.figure(fig)  # hand the figure to pyplot so plt.show() opens a window for it
         plt.show()  # opens both windows; returns when they are closed
         for fig in figures:
             plt.close(fig)

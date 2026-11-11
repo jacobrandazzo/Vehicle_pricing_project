@@ -287,9 +287,12 @@ class DepreciationCurves(BaseModel):
     car: CarPoint
     age_t_stat: float  # b2 divided by its standard error
     age_effect_clear: bool  # |age_t_stat| >= CLEAR_T_STAT
+    alpha: float  # the bands are 1 - alpha prediction intervals
 
 
-def depreciation_curves(model: FittedModel, query: VehicleQuery) -> DepreciationCurves:
+def depreciation_curves(
+    model: FittedModel, query: VehicleQuery, alpha: float = DEFAULT_ALPHA
+) -> DepreciationCurves:
     """Price curves for one car: against mileage, and against age. Data only, no plotting.
 
     - Mileage curve: price over the fitted mileage range, with the car's age
@@ -299,7 +302,7 @@ def depreciation_curves(model: FittedModel, query: VehicleQuery) -> Depreciation
       none), so it shows what extra years alone cost.
 
     Each curve has CURVE_POINTS evenly spaced points, each with the median
-    price and its prediction interval. Everything, including the car's own
+    price and its 1 - alpha prediction interval. Everything, including the car's own
     point, comes from predict_interval, so the car sits exactly on both curves.
 
     age_t_stat says how clearly the listings show an age effect once mileage
@@ -314,12 +317,12 @@ def depreciation_curves(model: FittedModel, query: VehicleQuery) -> Depreciation
     odometer = query.odometer if odometer_is_cars else model.median_odometer
 
     miles = np.linspace(model.odometer_min, model.odometer_max, CURVE_POINTS)
-    m_est, m_lo, m_hi = predict_interval(model, miles, age)
+    m_est, m_lo, m_hi = predict_interval(model, miles, age, alpha)
     ages = np.linspace(model.age_min, model.age_max, CURVE_POINTS)
-    a_est, a_lo, a_hi = predict_interval(model, odometer, ages)
+    a_est, a_lo, a_hi = predict_interval(model, odometer, ages, alpha)
 
     if odometer_is_cars:
-        c_est, c_lo, c_hi = (float(v) for v in predict_interval(model, odometer, age))
+        c_est, c_lo, c_hi = (float(v) for v in predict_interval(model, odometer, age, alpha))
     else:
         c_est = c_lo = c_hi = None
 
@@ -348,6 +351,7 @@ def depreciation_curves(model: FittedModel, query: VehicleQuery) -> Depreciation
         ),
         age_t_stat=t_stat,
         age_effect_clear=abs(t_stat) >= CLEAR_T_STAT,
+        alpha=alpha,
     )
 
 

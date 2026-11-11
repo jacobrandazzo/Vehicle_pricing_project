@@ -43,7 +43,17 @@ Describe a vehicle, for example:
 > 2015 Toyota Camry, 90,000 miles
 ```
 
-It prints the estimated price and its 95% range, then opens two plot windows: the listings with the fitted curve (your vehicle marked on it), and the residuals. Close both windows to ask again; typing `quit` exits.
+It prints the estimated price and its 95% range, then opens two plot windows: the depreciation curves (your vehicle marked on them), and the residuals. Close both windows to ask again; typing `quit` exits.
+
+The depreciation window shows price against mileage at your vehicle's age (left), and price against model year at your vehicle's mileage (right):
+
+![Toyota Camry depreciation curves](docs/camry_depreciation.png)
+
+When the listings show no clear age effect, the age curve is dashed and the panel says so:
+
+![Honda Civic depreciation curves](docs/civic_depreciation.png)
+
+To redraw these two images, run `python make_figures.py` (no API key needed).
 
 A description needs at least a make or model. Without a mileage you get the plots but no price. Follow-ups change the last vehicle: "what about 120k miles?", "make it a 2018", or "only manual ones". Describing a different vehicle ("now a Honda Civic") starts fresh.
 
@@ -66,9 +76,10 @@ This runs four fixed queries (one with no mileage) through filtering, fitting an
 - `src/vehicle_pricing/agent.py`: asks Claude to turn a description into a `VehicleQuery`
 - `src/vehicle_pricing/schemas.py`: the `VehicleQuery` and `PriceResult` data shapes
 - `src/vehicle_pricing/data.py`: loads and cleans the listings, and filters them for a query
-- `src/vehicle_pricing/model.py`: fits the price curve and predicts a price with its range
-- `src/vehicle_pricing/plots.py`: the fit and residual plots
+- `src/vehicle_pricing/model.py`: fits price on mileage and age, predicts a price with its range, and builds the depreciation curves
+- `src/vehicle_pricing/plots.py`: the depreciation and residual plots
 - `make_baseline.py`: writes `baseline.txt` and `baseline_offline.txt`, reference results for checking changes
+- `make_figures.py`: saves the README images in `docs/`
 - `data/vehicles_slim.csv.gz`: the listings data (compressed, about 11 MB)
 - `pyproject.toml`, `requirements.txt`: package settings and the libraries `pip install -e .` installs
 - `.env.example`: a template for your `.env` file

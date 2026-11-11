@@ -1,108 +1,158 @@
 """Plots of the listings and a fitted price model.
 
-Each function builds its own figure and returns it without showing it, so the
-caller decides what to do: plt.show() in a script, fig.savefig() to a file, or
-let a notebook display it.
+Each function builds a matplotlib Figure directly (not through pyplot), so
+plotting never touches pyplot's global state or needs a GUI backend. The
+caller decides what to do with it: fig.savefig() to a file, plt.figure(fig)
+then plt.show() in a script, or let a notebook display it.
 """
 
 import numpy as np
 import pandas as pd
-from matplotlib import pyplot as plt
 from matplotlib.figure import Figure
+from matplotlib.ticker import StrMethodFormatter
 
-from vehicle_pricing.model import DEFAULT_ALPHA, FittedModel, predict_interval, query_age
-from vehicle_pricing.schemas import PriceResult, VehicleQuery
+from vehicle_pricing.model import (
+    DepreciationCurves,
+    FittedModel,
+    predict_interval,
+)
+
+DOLLARS = StrMethodFormatter("${x:,.0f}")
+LISTING_STYLE = {"s": 6, "color": "0.6", "alpha": 0.35, "linewidths": 0}
+CURVE_COLOR = "tab:red"
+JITTER_YEARS = 0.3  # spreads listings of one model year sideways so they don't overlap
+JITTER_SEED = 0
 
 
-def plot_fit(
+def plot_depreciation(
     listings: pd.DataFrame,
-    model: FittedModel,
-    result: PriceResult | None = None,
+    curves: DepreciationCurves,
     *,
-    query: VehicleQuery | None = None,
-    alpha: float = DEFAULT_ALPHA,
-    title: str = "Price vs. odometer",
+    title: str = "Vehicle",
+    alpha: float | None = None,
 ) -> Figure:
-    """Scatterplot of price vs. odometer, with the fitted median and prediction interval.
+    """Price against mileage (left) and against model year (right), with the car marked.
 
-    The curve holds age at the car's age (query_age). The car comes from
-    `query`, or from `result` if no query is given; with neither, the
-    listings' median age is used. If a PriceResult is given, its prediction
-    is marked with its interval.
+    Both panels share the price axis. Left: the listings and the mileage
+    curve, with age held at the car's age. Right: the listings and the age
+    curve, with mileage held fixed (the car's own, or the listings' median),
+    plus a top axis showing age. If the listings show no clear age effect,
+    the age curve is dashed and the panel says so.
+
+    `title` names the vehicle; the number of listings and their model years
+    are added. `alpha` defaults to the one the curves were computed with.
     """
-    if query is None and result is not None:
-        query = result.query
-    age = query_age(model, query) if query is not None else model.median_age
-    curve = _curve(model, age, alpha=alpha)
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.scatter(listings["odometer"], listings["price"], s=6, alpha=0.25, label="Listings")
-    ax.plot(
-        curve["odometer"], curve["estimate"], color="red",
-        label=(f"Box-Cox fit (median) at age {age:.1f} years, R² = {model.r2:.3f}\n"
-               f"[λx = {model.lambda_x:.2f}, λa = {model.lambda_age:.2f}, "
-               f"λy = {model.lambda_y:.2f}]"),
+    alpha = _check_alpha(curves, alpha)
+    band_label = f"{1 - alpha:.0%} prediction interval"
+    car = curves.car
+    ref_year = car.model_year + car.age  # model_year = ref_year - age throughout
+
+    fig = Figure(figsize=(13, 5.5), layout="constrained")
+    ax_miles, ax_years = fig.subplots(1, 2, sharey=True)
+
+    # Left: price vs. mileage, at the car's age.
+    mileage = curves.mileage_curve.to_frame()
+    ax_miles.scatter(listings["odometer"], listings["price"], label="Listings", **LISTING_STYLE)
+    ax_miles.plot(
+        mileage["odometer"], mileage["price"], color=CURVE_COLOR,
+        label=f"Median at age {curves.fixed_age:.1f} years ({car.model_year:.0f} model year)",
     )
-    ax.fill_between(
-        curve["odometer"], curve["lower"], curve["upper"],
-        color="red", alpha=0.15, label=f"{1 - alpha:.0%} prediction interval",
+    ax_miles.fill_between(
+        mileage["odometer"], mileage["lower"], mileage["upper"],
+        color=CURVE_COLOR, alpha=0.15, label=band_label,
     )
-    if result is not None:
-        _mark_prediction(ax, result)
-    ax.set_ylim(bottom=0)
-    ax.legend()
-    ax.set(title=f"{title} (n = {model.n:,})", xlabel="Odometer (miles)", ylabel="Price ($)")
-    fig.tight_layout()
+    ax_miles.set(xlabel="Odometer (miles)", ylabel="Price")
+    ax_miles.xaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
+
+    # Right: price vs. model year, at a fixed mileage.
+    ages = curves.age_curve.to_frame()
+    jitter = np.random.default_rng(JITTER_SEED).uniform(
+        -JITTER_YEARS, JITTER_YEARS, size=len(listings)
+    )
+    ax_years.scatter(listings["year"] + jitter, listings["price"], label="Listings", **LISTING_STYLE)
+    whose = "this car's mileage" if curves.odometer_is_cars else "median mileage"
+    ax_years.plot(
+        ages["model_year"], ages["price"], color=CURVE_COLOR,
+        linestyle="-" if curves.age_effect_clear else "--",
+        label=f"Median at {curves.fixed_odometer:,.0f} miles ({whose})",
+    )
+    ax_years.fill_between(
+        ages["model_year"], ages["lower"], ages["upper"],
+        color=CURVE_COLOR, alpha=0.15, label=band_label,
+    )
+    ax_years.set(xlabel="Model year")
+    ax_years.xaxis.set_major_formatter(StrMethodFormatter("{x:.0f}"))
+    top = ax_years.secondary_xaxis(
+        "top", functions=(lambda year: ref_year - year, lambda age: ref_year - age)
+    )
+    top.set_xlabel("Age (years)")
+    if not curves.age_effect_clear:
+        ax_years.text(
+            0.5, 0.97, f"No clear age effect in these listings (t = {curves.age_t_stat:.2f})",
+            transform=ax_years.transAxes, ha="center", va="top", fontsize=10,
+            bbox={"boxstyle": "round", "facecolor": "lightyellow", "edgecolor": "0.5"},
+        )
+
+    if car.price is not None:
+        yerr = [[car.price - car.lower], [car.upper - car.price]]
+        label = (f"This car: ${car.price:,.0f} "
+                 f"({1 - alpha:.0%} range ${car.lower:,.0f}–${car.upper:,.0f})")
+        ax_miles.errorbar(car.odometer, car.price, yerr=yerr, fmt="o", color="black",
+                          capsize=4, zorder=3, label=label)
+        ax_years.errorbar(car.model_year, car.price, yerr=yerr, fmt="o", color="black",
+                          capsize=4, zorder=3, label=label)
+
+    ax_miles.set_ylim(bottom=0)
+    ax_miles.yaxis.set_major_formatter(DOLLARS)
+    ax_miles.legend(loc="upper right", fontsize=9)
+    # Newer (pricier) cars sit at the top right, so this legend goes top left,
+    # below the note if there is one.
+    below_note = {} if curves.age_effect_clear else {"bbox_to_anchor": (0, 0.9)}
+    ax_years.legend(loc="upper left", fontsize=9, **below_note)
+
+    years = listings["year"]
+    span = f"{years.min()}" if years.min() == years.max() else f"{years.min()}–{years.max()}"
+    fig.suptitle(f"{title}: {len(listings):,} listings, model years {span}")
     return fig
 
 
 def plot_residuals(
     listings: pd.DataFrame,
     model: FittedModel,
+    curves: DepreciationCurves,
     *,
-    alpha: float = DEFAULT_ALPHA,
     title: str = "Residuals vs. odometer",
 ) -> Figure:
     """Residuals (in dollars) of the full mileage-and-age model, against odometer.
 
-    Each listing's residual uses its own age. The band is the prediction
-    interval at the listings' median age.
+    Each listing's residual uses its own mileage and age. The band is the
+    prediction interval from curves.mileage_curve, at the car's age.
     """
-    curve = _curve(model, model.median_age, alpha=alpha)
-    fig, ax = plt.subplots(figsize=(8, 6))
-    ax.scatter(listings["odometer"], _residuals(listings, model), s=6, alpha=0.25)
-    ax.axhline(0, color="red", linewidth=1)
+    band = curves.mileage_curve.to_frame()
+    fig = Figure(figsize=(8, 6), layout="constrained")
+    ax = fig.subplots()
+    ax.scatter(listings["odometer"], _residuals(listings, model), **LISTING_STYLE)
+    ax.axhline(0, color=CURVE_COLOR, linewidth=1)
     ax.fill_between(
-        curve["odometer"],
-        curve["lower"] - curve["estimate"],
-        curve["upper"] - curve["estimate"],
-        color="red", alpha=0.15,
-        label=f"{1 - alpha:.0%} prediction interval at median age {model.median_age:.1f} years",
+        band["odometer"], band["lower"] - band["price"], band["upper"] - band["price"],
+        color=CURVE_COLOR, alpha=0.15,
+        label=f"{1 - curves.alpha:.0%} prediction interval at age {curves.fixed_age:.1f} years",
     )
-    ax.set(title=title, xlabel="Odometer (miles)", ylabel="Residual ($)")
+    ax.set(title=title, xlabel="Odometer (miles)", ylabel="Residual")
+    ax.xaxis.set_major_formatter(StrMethodFormatter("{x:,.0f}"))
+    ax.yaxis.set_major_formatter(DOLLARS)
     ax.legend()
     return fig
 
 
-def _mark_prediction(ax, result: PriceResult) -> None:
-    """Draw the predicted price at the query's mileage, with error bars for its interval."""
-    ax.errorbar(
-        result.query.odometer, result.predicted_price,
-        yerr=[[result.predicted_price - result.lower_bound],
-              [result.upper_bound - result.predicted_price]],
-        fmt="o", color="black", capsize=4, zorder=3,
-        label=f"This vehicle: ${result.predicted_price:,.0f}",
-    )
-
-
-def _curve(
-    model: FittedModel, age: float, n_points: int = 100, alpha: float = DEFAULT_ALPHA
-) -> pd.DataFrame:
-    """Estimate and interval over the fitted odometer range, with age held fixed."""
-    odometer = np.linspace(model.odometer_min, model.odometer_max, n_points)
-    estimate, lower, upper = predict_interval(model, odometer, age, alpha)
-    return pd.DataFrame(
-        {"odometer": odometer, "estimate": estimate, "lower": lower, "upper": upper}
-    )
+def _check_alpha(curves: DepreciationCurves, alpha: float | None) -> float:
+    """The curves' alpha; a different one would mislabel bands computed at the curves' alpha."""
+    if alpha is not None and alpha != curves.alpha:
+        raise ValueError(
+            f"The curves were computed with alpha={curves.alpha}; "
+            f"recompute them with depreciation_curves(..., alpha={alpha})."
+        )
+    return curves.alpha
 
 
 def _residuals(listings: pd.DataFrame, model: FittedModel) -> np.ndarray:

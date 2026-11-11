@@ -7,9 +7,13 @@ Fixtures defined here can be used by any test just by naming them as arguments.
 import os
 import socket
 
+import matplotlib
 import numpy as np
 import pandas as pd
 import pytest
+
+# Draw plots off-screen: tests never open windows, and work without a display.
+matplotlib.use("Agg")
 
 # Use a fake key so importing vehicle_pricing.agent never picks up the real one
 # from .env (load_dotenv doesn't override variables that are already set).
