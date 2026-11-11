@@ -84,7 +84,7 @@ def format_result(description, query, rows_after_cleaning, matched, dropped, fit
         f"box-cox lambda_x (odometer): {fit.lambda_x!r}",
         f"box-cox lambda_age (age + 1): {fit.lambda_age!r}",
         f"box-cox lambda_y (price): {fit.lambda_y!r}",
-        f"coefficients b0, b1 (odometer), b2 (age): {fit.b0!r}, {fit.b1!r}, {fit.b2!r}",
+        f"coefficients b0, b1 (odometer), b2 (age): {', '.join(repr(c) for c in fit.coef)}",
         f"r-squared (transformed): {fit.r2!r}",
         f"car's age used (years): {query_age(fit, query)!r}",
         f"age effect t-stat: {curves.age_t_stat!r}",

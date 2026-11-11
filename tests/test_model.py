@@ -39,7 +39,7 @@ def test_more_miles_means_lower_predicted_price(camry_model):
 
 
 def test_price_falls_with_age_on_fixture(camry_model):
-    assert camry_model.b2 < 0
+    assert camry_model.coef[camry_model.columns.index("age")] < 0
 
 
 def test_older_car_gets_lower_price_at_same_mileage(camry_model):
@@ -215,3 +215,55 @@ def test_every_curve_point_has_typical_and_car_is_typical(camry_model):
     assert curves.typical_range == (low, high)
     # The mileage curve covers more than the typical range, so some points aren't.
     assert not all(point.typical for point in curves.mileage_curve.points)
+
+
+def test_clean_title_feature_gets_positive_coefficient(camry_listings):
+    # Every other listing (22 of 44, enough for MIN_FEATURE_COUNT) is salvage, priced 40% lower.
+    salvage = np.arange(len(camry_listings)) % 2 == 0
+    listings = camry_listings.assign(
+        title_status=np.where(salvage, "salvage", "clean"),
+        price=np.where(salvage, camry_listings["price"] * 0.6, camry_listings["price"]).round(),
+    )
+
+    model = fit_model(listings, features=("clean_title",))
+
+    assert model.features == ["clean_title"]
+    assert model.columns == ["intercept", "odometer", "age", "clean_title"]
+    assert model.coef[model.columns.index("clean_title")] > 0
+
+
+def test_feature_with_too_few_listings_is_skipped(camry_listings):
+    # Only 5 of 44 listings are 4wd: fewer than MIN_FEATURE_COUNT (20).
+    drive = np.where(np.arange(len(camry_listings)) < 5, "4wd", "fwd")
+
+    model = fit_model(camry_listings.assign(drive=drive), features=("four_wd",))
+
+    assert model.features == []
+    assert model.columns == ["intercept", "odometer", "age"]
+    assert model.feature_shares["four_wd"] == pytest.approx(5 / 44)
+
+
+def test_rare_but_real_feature_is_kept():
+    # 30 problem titles out of 1,000 listings: only 3%, but 30 >= MIN_FEATURE_COUNT.
+    rng = np.random.default_rng(seed=3)
+    n = 1_000
+    year = rng.integers(2010, 2021, size=n)
+    posting_date = pd.Series(
+        pd.Timestamp("2021-04-01", tz="UTC") + pd.to_timedelta(np.arange(n) % 30, unit="D")
+    )
+    age = vehicle_age(posting_date, year)
+    odometer = rng.uniform(10_000, 200_000, size=n)
+    problem = np.arange(n) < 30
+    price = (
+        30_000 * np.exp(-odometer / 150_000) * np.exp(-0.08 * age)
+        * np.where(problem, 0.6, 1.0) * rng.uniform(0.85, 1.15, size=n)
+    )
+    listings = pd.DataFrame({
+        "year": year, "odometer": odometer, "price": price.round(), "posting_date": posting_date,
+        "age": age, "title_status": np.where(problem, "salvage", "clean"),
+    })
+
+    model = fit_model(listings, features=("clean_title",))
+
+    assert model.features == ["clean_title"]
+    assert model.coef[model.columns.index("clean_title")] > 0

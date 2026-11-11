@@ -18,6 +18,7 @@ from matplotlib.ticker import MaxNLocator, StrMethodFormatter
 from vehicle_pricing.model import (
     DepreciationCurves,
     FittedModel,
+    listing_features,
     predict_interval,
 )
 
@@ -279,5 +280,8 @@ def _check_alpha(curves: DepreciationCurves, alpha: float | None) -> float:
 
 def _residuals(listings: pd.DataFrame, model: FittedModel) -> np.ndarray:
     """Actual price minus the fitted median price (at each listing's mileage and age), in dollars."""
-    estimate, _, _ = predict_interval(model, listings["odometer"], listings["age"])
+    estimate, _, _ = predict_interval(
+        model, listings["odometer"], listings["age"],
+        feature_values=listing_features(model, listings),
+    )
     return np.asarray(listings["price"], dtype=float) - estimate

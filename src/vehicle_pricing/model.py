@@ -4,14 +4,20 @@ The model is a plane in Box-Cox-transformed space:
 
     boxcox(price, lambda_y) = b0 + b1 * boxcox(odometer, lambda_x)
                                  + b2 * boxcox(age + 1, lambda_age)
+                                 [+ one coefficient per optional 0/1 feature]
 
 Age is in years (see data.vehicle_age); 1 is added because Box-Cox needs
-positive inputs and a car can be 0 years old. The coefficients come from
-least squares. The three lambdas are chosen by maximising the Box-Cox profile
+positive inputs and a car can be 0 years old. Optional features (see
+FEATURES), such as a clean title, enter untransformed as 0/1 columns. The
+coefficients come from least squares. The three lambdas are chosen by maximising the Box-Cox profile
 log-likelihood (see fit_model). Predictions back-transform to dollars, so the
 estimate is a median price, with a prediction interval for a single listing.
 depreciation_curves returns price against mileage and against age, as data.
 """
+
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -25,7 +31,9 @@ from vehicle_pricing.data import decimal_year
 from vehicle_pricing.schemas import MIN_LISTINGS, PriceResult, VehicleQuery
 
 DEFAULT_ALPHA = 0.05  # 95% prediction interval
-N_COEFS = 3  # b0, b1, b2
+BASE_COLUMNS = ("intercept", "odometer", "age")  # always in the model, in this order
+MIN_FEATURE_COUNT = 20  # a feature is skipped unless at least this many listings are 1 and 0
+PROBLEM_TITLES = frozenset({"salvage", "rebuilt", "parts only", "missing"})
 MIN_AGE_SPREAD = 1.0  # years between the youngest and oldest listing needed to fit age
 OUTLIER_PASSES = 3  # most drop_outliers passes (fit, score, drop) before stopping
 CURVE_POINTS = 100  # points along each depreciation curve
@@ -46,6 +54,67 @@ class TypicalMileage(BaseModel):
     high: float  # 95th percentile odometer, in miles
 
 
+@dataclass(frozen=True)
+class Feature:
+    """An optional 0/1 predictor.
+
+    column(listings) gives each listing's value (an array of 0s and 1s).
+    for_query(query, listings_share) gives the car's value; listings_share is
+    the share of 1s in the fitted listings, for when the query doesn't say.
+    """
+
+    description: str
+    column: Callable[[pd.DataFrame], np.ndarray]
+    for_query: Callable[[VehicleQuery, float], float]
+
+
+def _clean_title_column(listings: pd.DataFrame) -> np.ndarray:
+    """0 for a problem title, 1 otherwise.
+
+    Problem titles (PROBLEM_TITLES) are "salvage", "rebuilt", "parts only"
+    and "missing" (the literal value, meaning the car has no title).
+    Everything else is 1: "clean", and "lien", which means an outstanding
+    loan rather than damage (lien listings sell above clean ones).
+
+    An empty title_status (NaN) is treated as clean, i.e. imputed with the
+    most common value: clean is about 95% of titles, and NaN is only about
+    1.5% of listings, too few to be a category of its own.
+    """
+    status = listings["title_status"].astype("string").str.strip().str.lower()
+    return (~status.isin(PROBLEM_TITLES).fillna(False)).to_numpy(dtype=float)
+
+
+def _four_wd_column(listings: pd.DataFrame) -> np.ndarray:
+    """1 if the drivetrain is 4wd, else 0 (fwd, rwd or missing)."""
+    return (listings["drive"] == "4wd").to_numpy(dtype=float)
+
+
+def _four_wd_for_query(query: VehicleQuery, listings_share: float) -> float:
+    """1 or 0 if the query names a drivetrain, otherwise the listings' share of 4wd.
+
+    Using the share (a value between 0 and 1) gives a price averaged over the
+    mix of drivetrains in the listings, rather than pretending to know which
+    one this car has.
+    """
+    if query.drive is not None:
+        return 1.0 if query.drive == "4wd" else 0.0
+    return listings_share
+
+
+FEATURES: dict[str, Feature] = {
+    "clean_title": Feature(
+        description="Clean (or unstated) title, versus salvage, rebuilt and the like.",
+        column=_clean_title_column,
+        for_query=lambda query, listings_share: 1.0,  # the car is priced as clean-titled
+    ),
+    "four_wd": Feature(
+        description="Four-wheel drive.",
+        column=_four_wd_column,
+        for_query=_four_wd_for_query,
+    ),
+}
+
+
 class FittedModel(BaseModel):
     """Everything needed to predict from a fitted model, without the listings."""
 
@@ -54,11 +123,12 @@ class FittedModel(BaseModel):
     lambda_x: float  # Box-Cox exponent for odometer
     lambda_age: float  # Box-Cox exponent for age + 1
     lambda_y: float  # Box-Cox exponent for price
-    b0: float  # intercept, in transformed space
-    b1: float  # coefficient on transformed odometer
-    b2: float  # coefficient on transformed age + 1
-    xtx_inv: list[list[float]]  # (X^T X)^-1 of the 3-column design matrix
-    resid_se: float  # residual standard error s, in transformed space (n - 3 df)
+    columns: list[str]  # design columns: ["intercept", "odometer", "age", *features]
+    coef: list[float]  # one coefficient per column, in transformed space
+    features: list[str]  # the optional features used (columns after "age")
+    feature_shares: dict[str, float]  # share of 1s in the listings, per requested feature
+    xtx_inv: list[list[float]]  # (X^T X)^-1 of the design matrix
+    resid_se: float  # residual standard error s, in transformed space (n - len(coef) df)
     n: int  # number of listings the model was fit on
     odometer_min: float  # odometer range fitted on, in miles
     odometer_max: float
@@ -78,10 +148,21 @@ def fit_model(
     lambda_range: tuple[float, float] = (-2.0, 2.0),
     grid_step: float = 0.25,
     min_samples: int = MIN_LISTINGS,
+    features: Sequence[str] = (),
 ) -> FittedModel:
     """Fit the model to the listings' 'odometer', 'age', 'price' and 'posting_date' columns.
 
     The 'year' column is used only for typical_mileage (see _typical_mileage).
+
+    `features` names optional 0/1 predictors from FEATURES, added after age.
+    A feature is skipped if fewer than MIN_FEATURE_COUNT (20) listings have
+    a 1, or fewer than 20 have a 0: with so few on one side its coefficient
+    can't be estimated reliably. A count, not a share, so a rare but real
+    category is still used once there are enough cars in it (e.g. problem
+    titles are only about 4% of Camrys, but that is about 46 listings). The
+    model records which were used (`features`) and each requested feature's
+    share of 1s (`feature_shares`). Features are not transformed, so the lambda search
+    is unchanged; they just add columns to each least-squares fit in it.
 
     The lambdas maximise the Box-Cox profile log-likelihood
 
@@ -116,19 +197,29 @@ def fit_model(
             "try a wider year range."
         )
 
-    a1 = age + 1
+    unknown = [name for name in features if name not in FEATURES]
+    if unknown:
+        raise KeyError(f"Unknown feature(s) {unknown}. Available: {sorted(FEATURES)}")
+    values = {name: FEATURES[name].column(df) for name in features}
+    shares = {name: float(v.mean()) for name, v in values.items()}
+    used = [name for name in features
+            if min(values[name].sum(), (1 - values[name]).sum()) >= MIN_FEATURE_COUNT]
+    columns = [*BASE_COLUMNS, *used]
+    feature_values = {name: values[name] for name in used}
     sum_log_y = float(np.sum(np.log(y)))
 
-    lam_x, lam_age, lam_y = _grid_search(x, a1, y, sum_log_y, lambda_range, grid_step)
+    lam_x, lam_age, lam_y = _grid_search(
+        x, age, feature_values, columns, y, sum_log_y, lambda_range, grid_step
+    )
     refined = minimize(
-        lambda p: -_log_likelihood(x, a1, y, sum_log_y, *p),
+        lambda p: -_log_likelihood(x, age, feature_values, columns, y, sum_log_y, *p),
         x0=[lam_x, lam_age, lam_y],
         method="Nelder-Mead",
         bounds=[lambda_range] * 3,
     )
     lam_x, lam_age, lam_y = (float(v) for v in refined.x)
 
-    X = _design(boxcox(x, lam_x), boxcox(a1, lam_age))
+    X = _build_design(_DesignSpec(lam_x, lam_age, columns), x, age, feature_values)
     ty = boxcox(y, lam_y)
     coef, *_ = np.linalg.lstsq(X, ty, rcond=None)
     resid = ty - X @ coef
@@ -140,11 +231,12 @@ def fit_model(
         lambda_x=lam_x,
         lambda_age=lam_age,
         lambda_y=lam_y,
-        b0=float(coef[0]),
-        b1=float(coef[1]),
-        b2=float(coef[2]),
+        columns=columns,
+        coef=[float(c) for c in coef],
+        features=used,
+        feature_shares=shares,
         xtx_inv=(r_inv @ r_inv.T).tolist(),
-        resid_se=float(np.sqrt(rss / (x.size - N_COEFS))),
+        resid_se=float(np.sqrt(rss / (x.size - len(coef)))),
         n=int(x.size),
         odometer_min=float(x.min()),
         odometer_max=float(x.max()),
@@ -154,9 +246,33 @@ def fit_model(
         median_age=float(np.median(age)),
         ref_year=float(np.median(decimal_year(df["posting_date"]))),
         r2=float(1 - rss / np.sum((ty - ty.mean()) ** 2)),
-        log_likelihood=_log_likelihood(x, a1, y, sum_log_y, lam_x, lam_age, lam_y),
+        log_likelihood=_log_likelihood(
+            x, age, feature_values, columns, y, sum_log_y, lam_x, lam_age, lam_y
+        ),
         typical_mileage=_typical_mileage(df),
     )
+
+
+def coef_t_stat(model: FittedModel, column: str) -> float:
+    """A coefficient divided by its standard error, s * sqrt([(X^T X)^-1] on the diagonal).
+
+    `column` is a name from model.columns, e.g. "age" or "clean_title".
+    """
+    if column not in model.columns:
+        raise KeyError(f"The model has no column {column!r}. Columns: {model.columns}")
+    i = model.columns.index(column)
+    return float(model.coef[i] / (model.resid_se * np.sqrt(model.xtx_inv[i][i])))
+
+
+def query_features(model: FittedModel, query: VehicleQuery) -> dict[str, float]:
+    """The car's value for each feature the model uses (see Feature.for_query)."""
+    return {name: FEATURES[name].for_query(query, model.feature_shares[name])
+            for name in model.features}
+
+
+def listing_features(model: FittedModel, listings: pd.DataFrame) -> dict[str, np.ndarray]:
+    """Each listing's value for each feature the model uses."""
+    return {name: FEATURES[name].column(listings) for name in model.features}
 
 
 def query_age(model: FittedModel, query: VehicleQuery) -> float:
@@ -212,7 +328,10 @@ def typical_mileage_range(model: FittedModel, model_year: int) -> tuple[float, f
 
 
 def drop_outliers(
-    listings: pd.DataFrame, z: float = 3.5, max_passes: int = OUTLIER_PASSES
+    listings: pd.DataFrame,
+    z: float = 3.5,
+    max_passes: int = OUTLIER_PASSES,
+    features: Sequence[str] = (),
 ) -> pd.DataFrame:
     """Return a copy of the listings without those whose price is far off the fitted model.
 
@@ -243,23 +362,28 @@ def drop_outliers(
     again catches more. It stops when a pass drops nothing, or after
     max_passes, so it can't keep eating into real listings.
 
+    Each pass fits with the given `features` (see fit_model).
+
     If MAD is 0 (most residuals identical), z can't be computed and that
     pass drops nothing. fit_model's errors (too few listings, no age
     spread) are raised as they are.
     """
     kept = listings
     for _ in range(max_passes):
-        within = _within_robust_z(kept, z)
+        within = _within_robust_z(kept, z, features)
         if within.all():
             break
         kept = kept[within]
     return kept.copy()
 
 
-def _within_robust_z(listings: pd.DataFrame, z: float) -> np.ndarray:
+def _within_robust_z(listings: pd.DataFrame, z: float, features: Sequence[str]) -> np.ndarray:
     """One pass of drop_outliers: True for listings with |robust z| <= z."""
-    model = fit_model(listings)
-    fitted = _model_design(model, listings["odometer"], listings["age"]) @ _coefs(model)
+    model = fit_model(listings, features=features)
+    design = _build_design(
+        model, listings["odometer"], listings["age"], listing_features(model, listings)
+    )
+    fitted = design @ np.array(model.coef)
     resid = boxcox(np.asarray(listings["price"], dtype=float), model.lambda_y) - fitted
     centre = np.median(resid)
     mad = np.median(np.abs(resid - centre))
@@ -275,12 +399,15 @@ def predict_price(
 
     The result is marked extrapolated if the mileage or age is outside what
     the model was fitted on, or the mileage is unusual for the car's model
-    year (outside typical_mileage_range, or there is no range).
+    year (outside typical_mileage_range, or there is no range). Features
+    are set to the car's values (query_features).
     """
     if query.odometer is None:
         raise ValueError("A price prediction needs the vehicle's mileage (odometer).")
     age = query_age(model, query)
-    estimate, lower, upper = predict_interval(model, query.odometer, age, alpha)
+    estimate, lower, upper = predict_interval(
+        model, query.odometer, age, alpha, feature_values=query_features(model, query)
+    )
     typical_range = typical_mileage_range(model, car_model_year(model, query))
     return PriceResult(
         predicted_price=float(estimate),
@@ -297,22 +424,25 @@ def predict_price(
 
 
 def predict_interval(
-    model: FittedModel, odometer: ArrayLike, age: ArrayLike, alpha: float = DEFAULT_ALPHA
+    model: FittedModel,
+    odometer: ArrayLike,
+    age: ArrayLike,
+    alpha: float = DEFAULT_ALPHA,
+    feature_values: Mapping[str, ArrayLike] | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Return (estimate, lower, upper) prices in dollars for one or many cars.
 
-    odometer (miles) and age (years) are broadcast against each other, so
-    either can be a single value. The estimate is the *median* price
-    (back-transforming a mean in Box-Cox space gives a median). The bounds
-    form a ``1 - alpha`` prediction interval for a single new listing.
+    odometer (miles), age (years) and any feature values are broadcast
+    against each other, so each can be a single value. feature_values maps
+    each feature the model uses to its value(s); it can be left out when the
+    model uses none. The estimate is the *median* price (back-transforming a
+    mean in Box-Cox space gives a median). The bounds form a ``1 - alpha``
+    prediction interval for a single new listing.
     """
-    odometer, age = np.broadcast_arrays(
-        np.asarray(odometer, dtype=float), np.asarray(age, dtype=float)
-    )
-    x0 = _model_design(model, odometer, age)
-    y_hat = x0 @ _coefs(model)
+    x0 = _build_design(model, odometer, age, feature_values)
+    y_hat = x0 @ np.array(model.coef)
     half_width = _half_width(
-        x0, np.array(model.xtx_inv), model.resid_se, model.n - N_COEFS, alpha
+        x0, np.array(model.xtx_inv), model.resid_se, model.n - len(model.coef), alpha
     )
     return (
         boxcox_inverse(y_hat, model.lambda_y),
@@ -409,7 +539,7 @@ class DepreciationCurves(BaseModel):
     car_year: int  # the car's model year, from car_model_year
     typical_range: tuple[float, float] | None  # typical mileage for the car's model year
     car: CarPoint
-    age_t_stat: float  # b2 divided by its standard error
+    age_t_stat: float  # the age coefficient divided by its standard error
     age_effect_clear: bool  # |age_t_stat| >= CLEAR_T_STAT
     alpha: float  # the bands are 1 - alpha prediction intervals
 
@@ -425,6 +555,8 @@ def depreciation_curves(
       the car's mileage (or the listings' median mileage if the query has
       none), so it shows what extra years alone cost.
 
+    Any features the model uses are held at the car's values (query_features).
+
     Each curve has CURVE_POINTS evenly spaced points, each with the median
     price and its 1 - alpha prediction interval. Everything, including the car's own
     point, comes from predict_interval, so the car sits exactly on both curves.
@@ -435,7 +567,7 @@ def depreciation_curves(
     point's model year (rounded to a whole year). No range means not typical.
 
     age_t_stat says how clearly the listings show an age effect once mileage
-    is accounted for: the age coefficient b2 divided by its standard error.
+    is accounted for: the age coefficient divided by its standard error.
     If |t| >= 2, the effect is about two standard errors or more from zero,
     so it is unlikely to be just noise (roughly a 95% test), and
     age_effect_clear is True. If |t| < 2, the age curve's slope may not mean
@@ -445,13 +577,17 @@ def depreciation_curves(
     odometer_is_cars = query.odometer is not None
     odometer = query.odometer if odometer_is_cars else model.median_odometer
 
+    car_features = query_features(model, query)
+
     miles = np.linspace(model.odometer_min, model.odometer_max, CURVE_POINTS)
-    m_est, m_lo, m_hi = predict_interval(model, miles, age, alpha)
+    m_est, m_lo, m_hi = predict_interval(model, miles, age, alpha, car_features)
     ages = np.linspace(model.age_min, model.age_max, CURVE_POINTS)
-    a_est, a_lo, a_hi = predict_interval(model, odometer, ages, alpha)
+    a_est, a_lo, a_hi = predict_interval(model, odometer, ages, alpha, car_features)
 
     if odometer_is_cars:
-        c_est, c_lo, c_hi = (float(v) for v in predict_interval(model, odometer, age, alpha))
+        c_est, c_lo, c_hi = (
+            float(v) for v in predict_interval(model, odometer, age, alpha, car_features)
+        )
     else:
         c_est = c_lo = c_hi = None
 
@@ -463,8 +599,7 @@ def depreciation_curves(
         for a in ages
     ]
 
-    b2_se = model.resid_se * np.sqrt(model.xtx_inv[2][2])
-    t_stat = float(model.b2 / b2_se)
+    t_stat = coef_t_stat(model, "age")
 
     return DepreciationCurves(
         mileage_curve=MileageCurve(points=[
@@ -551,34 +686,62 @@ def _round_half_up(x: float) -> int:
     return int(np.floor(x + 0.5))
 
 
-def _model_design(model: FittedModel, odometer: ArrayLike, age: ArrayLike) -> np.ndarray:
-    """Design rows [1, boxcox(odometer, lambda_x), boxcox(age + 1, lambda_age)] for a fitted model."""
-    odometer = np.asarray(odometer, dtype=float)
-    age = np.asarray(age, dtype=float)
-    return _design(boxcox(odometer, model.lambda_x), boxcox(age + 1, model.lambda_age))
+class _DesignSpec(NamedTuple):
+    """What _build_design needs, before a FittedModel exists (during the fit)."""
+
+    lambda_x: float
+    lambda_age: float
+    columns: Sequence[str]
 
 
-def _coefs(model: FittedModel) -> np.ndarray:
-    """The coefficients [b0, b1, b2] as an array."""
-    return np.array([model.b0, model.b1, model.b2])
+def _build_design(
+    model: FittedModel | _DesignSpec,
+    odometer: ArrayLike,
+    age: ArrayLike,
+    feature_values: Mapping[str, ArrayLike] | None = None,
+) -> np.ndarray:
+    """The design matrix: one row per car, one column per entry of model.columns.
 
-
-def _design(*predictors: np.ndarray) -> np.ndarray:
-    """Design matrix: a column of ones, then one column per predictor (last axis)."""
-    return np.stack([np.ones_like(predictors[0]), *predictors], axis=-1)
+    Columns are [1, boxcox(odometer, lambda_x), boxcox(age + 1, lambda_age),
+    *features]. Feature values are looked up by name and put in the model's
+    column order; odometer, age and the features are broadcast against each
+    other, so any of them can be a single value. This is the only place a
+    design matrix is built: fitting, the lambda search, prediction, outlier
+    scoring and the curves all use it.
+    """
+    feature_values = feature_values or {}
+    missing = [name for name in model.columns[len(BASE_COLUMNS):] if name not in feature_values]
+    if missing:
+        raise KeyError(
+            f"The model uses feature(s) {missing}; pass their values in feature_values."
+        )
+    odometer, age, *extras = np.broadcast_arrays(
+        np.asarray(odometer, dtype=float),
+        np.asarray(age, dtype=float),
+        *(np.asarray(feature_values[name], dtype=float)
+          for name in model.columns[len(BASE_COLUMNS):]),
+    )
+    return np.stack(
+        [np.ones_like(odometer), boxcox(odometer, model.lambda_x),
+         boxcox(age + 1, model.lambda_age), *extras],
+        axis=-1,
+    )
 
 
 def _log_likelihood(
-    x: np.ndarray, a1: np.ndarray, y: np.ndarray, sum_log_y: float,
+    x: np.ndarray, age: np.ndarray, feature_values: Mapping[str, np.ndarray],
+    columns: Sequence[str], y: np.ndarray, sum_log_y: float,
     lam_x: float, lam_age: float, lam_y: float,
 ) -> float:
     """Box-Cox profile log-likelihood at one set of lambdas (see fit_model)."""
-    rss = _rss(_design(boxcox(x, lam_x), boxcox(a1, lam_age)), boxcox(y, lam_y)[:, None])
+    X = _build_design(_DesignSpec(lam_x, lam_age, columns), x, age, feature_values)
+    rss = _rss(X, boxcox(y, lam_y)[:, None])
     return float(-(y.size / 2) * np.log(rss[0] / y.size) + (lam_y - 1) * sum_log_y)
 
 
 def _grid_search(
-    x: np.ndarray, a1: np.ndarray, y: np.ndarray, sum_log_y: float,
+    x: np.ndarray, age: np.ndarray, feature_values: Mapping[str, np.ndarray],
+    columns: Sequence[str], y: np.ndarray, sum_log_y: float,
     lambda_range: tuple[float, float], step: float,
 ) -> tuple[float, float, float]:
     """Best (lambda_x, lambda_age, lambda_y) on a grid with the given step.
@@ -588,12 +751,11 @@ def _grid_search(
     """
     grid = np.round(np.arange(lambda_range[0], lambda_range[1] + step / 2, step), 10)
     ty = np.column_stack([boxcox(y, ly) for ly in grid])
-    tas = [boxcox(a1, la) for la in grid]
     best = (-np.inf, 0.0, 0.0, 0.0)
     for lx in grid:
-        tx = boxcox(x, lx)
-        for la, ta in zip(grid, tas):
-            rss = _rss(_design(tx, ta), ty)  # one RSS per lambda_y
+        for la in grid:
+            X = _build_design(_DesignSpec(lx, la, columns), x, age, feature_values)
+            rss = _rss(X, ty)  # one RSS per lambda_y
             ll = -(y.size / 2) * np.log(rss / y.size) + (grid - 1) * sum_log_y
             i = int(np.argmax(ll))
             if ll[i] > best[0]:
