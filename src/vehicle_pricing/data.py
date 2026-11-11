@@ -66,6 +66,13 @@ def clean_vehicles(
     Craigslist data contains placeholder prices ($1, $123456), placeholder
     odometers (1, 999999), missing values and duplicate postings. The default
     ranges are conservative starting points -- tune them to your data.
+
+    Text columns (manufacturer, model, region, ...) come back as pandas
+    categories: each distinct value is stored once and every row holds a
+    small integer code, which cuts memory sharply. That matters on the free
+    hosting plan, which has little RAM. Values are not changed, only how
+    they're stored. The conversion is the last step, so the string cleaning
+    and the duplicate check above work on plain text.
     """
     required = ["price", "odometer", "year", "posting_date"]
     out = df.dropna(subset=required).copy()
@@ -88,6 +95,11 @@ def clean_vehicles(
 
     dedup_cols = [c for c in DEDUP_COLUMNS if c in out.columns]
     out = out.drop_duplicates(subset=dedup_cols)
+
+    # Last: store text as categories, once the values are final (see docstring).
+    for col in out.columns:
+        if pd.api.types.is_string_dtype(out[col]):
+            out[col] = out[col].astype("category")
 
     log.info("Cleaned listings: %d -> %d rows", len(df), len(out))
     return out.reset_index(drop=True)
