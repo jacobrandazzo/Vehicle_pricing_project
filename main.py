@@ -3,11 +3,24 @@
 import matplotlib.pyplot as plt
 
 from vehicle_pricing.agent import ParseError, parse_description
-from vehicle_pricing.data import check_manufacturer, filter_listings, load_data
+from vehicle_pricing.data import check_manufacturer, comparison_years, filter_listings, load_data
 from vehicle_pricing.model import fit_model, predict_price
 from vehicle_pricing.plots import plot_fit, plot_residuals
 
 QUIT_WORDS = ("quit", "exit", "done", "stop")
+
+
+def describe_years(low, high):
+    """The comparison window as words, e.g. '2010–2020 model years'."""
+    if low is None and high is None:
+        return "all model years"
+    if low is None:
+        return f"{high} and earlier model years"
+    if high is None:
+        return f"{low} and later model years"
+    if low == high:
+        return f"{low} model year"
+    return f"{low}–{high} model years"
 
 
 def main():
@@ -40,14 +53,18 @@ def main():
             print(f"{e}\n")  # `previous` is kept, so the user can rephrase
             continue
         previous = query
+        years = describe_years(*comparison_years(query))
 
         if result is None:
-            print(f"No mileage given, so no price estimate. Showing {model.n:,} listings.")
+            print(
+                "No mileage given, so no price estimate. "
+                f"Showing {model.n:,} listings ({years})."
+            )
         else:
             print(
                 f"Estimated price: ${result.predicted_price:,.0f} "
                 f"(95% range ${result.lower_bound:,.0f} to ${result.upper_bound:,.0f}), "
-                f"based on {result.n_listings:,} listings."
+                f"based on {result.n_listings:,} listings ({years})."
             )
             if result.extrapolated:
                 print("Warning: that mileage is outside the range of the listings, "

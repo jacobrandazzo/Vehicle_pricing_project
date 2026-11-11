@@ -29,7 +29,8 @@ _TOOL = {
 _SYSTEM_PROMPT = """You extract used-vehicle details from a short description.
 - manufacturer is the make in lowercase. If only the model is given, use its usual make (e.g. "Camry" -> "toyota").
 - model is the model name in lowercase, e.g. "civic", "f-150".
-- A single model year sets both year_min and year_max to that year. A range like "1996-2000" sets year_min=1996 and year_max=2000.
+- A single model year sets only year, e.g. "2015 Camry" -> year=2015. Leave year_min and year_max out.
+- A range like "1996-2000" sets year_min=1996 and year_max=2000. Leave year out.
 - odometer is the mileage in miles as a number: "90,000 miles" and "90k" are both 90000.
 - Leave out any field the description doesn't mention.
 
@@ -39,7 +40,9 @@ Sometimes the message comes with the current vehicle, from earlier in the conver
   "only manual ones"), return the full current vehicle with those changes applied.
 - If the message describes a different vehicle (e.g. "now a Honda Civic"), start fresh and
   carry nothing over.
-- If the message removes a filter (e.g. "any year"), leave that field out."""
+- "make it a 2018" sets year=2018 and removes any year_min and year_max.
+- If the message removes a filter, leave that field out. "any year" leaves year, year_min and
+  year_max all out."""
 
 
 class ParseError(Exception):

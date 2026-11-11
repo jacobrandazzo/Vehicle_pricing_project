@@ -1,17 +1,19 @@
 Baseline: full pipeline (parse_description via Claude)
 
 input: 2015 Camry, 90,000 miles
-parsed query: {'manufacturer': 'toyota', 'odometer': 90000.0, 'model': 'camry', 'year_min': 2015, 'year_max': 2015}
+parsed query: {'manufacturer': 'toyota', 'odometer': 90000.0, 'model': 'camry', 'year': 2015}
+comparison years: (2010, 2020)
 rows after cleaning: 319543
-listings matched: 97
-box-cox lambda_x (odometer): 0.5429687499999998
+listings matched: 1129
+box-cox lambda_x (odometer): 0.4633852720260618
 box-cox lambda_y (price): 1.0
-predicted price: 13326.984451305943
-lower bound: 8322.450842056427
-upper bound: 18331.51806055546
+predicted price: 12751.512847835584
+lower bound: 4523.242518180567
+upper bound: 20979.7831774906
 
 input: 1996-2000 Honda Civic 200,000 miles
 parsed query: {'manufacturer': 'honda', 'odometer': 200000.0, 'model': 'civic', 'year_min': 1996, 'year_max': 2000}
+comparison years: (1996, 2000)
 rows after cleaning: 319543
 listings matched: 92
 box-cox lambda_x (odometer): 1.0
@@ -21,19 +23,21 @@ lower bound: 910.8172459062985
 upper bound: 7864.529034349221
 
 input: 2016 Toyota Tacoma, 120,000 miles
-parsed query: {'manufacturer': 'toyota', 'odometer': 120000.0, 'model': 'tacoma', 'year_min': 2016, 'year_max': 2016}
+parsed query: {'manufacturer': 'toyota', 'odometer': 120000.0, 'model': 'tacoma', 'year': 2016}
+comparison years: (2011, 2021)
 rows after cleaning: 319543
-listings matched: 122
-box-cox lambda_x (odometer): 0.7620270538330074
+listings matched: 1119
+box-cox lambda_x (odometer): 0.6322265625
 box-cox lambda_y (price): 1.0
-predicted price: 26482.061375623944
-lower bound: 11430.327274565701
-upper bound: 41533.795476682186
+predicted price: 23466.088587231996
+lower bound: 9851.401442120985
+upper bound: 37080.775732343005
 
 input: 2015 Honda Accord
-parsed query: {'manufacturer': 'honda', 'model': 'accord', 'year_min': 2015, 'year_max': 2015}
+parsed query: {'manufacturer': 'honda', 'model': 'accord', 'year': 2015}
+comparison years: (2010, 2020)
 rows after cleaning: 319543
-listings matched: 82
-box-cox lambda_x (odometer): 1.0
+listings matched: 1078
+box-cox lambda_x (odometer): 0.3390820312500001
 box-cox lambda_y (price): 1.0
 predicted price: none (no mileage given)

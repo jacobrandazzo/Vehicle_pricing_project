@@ -10,6 +10,7 @@ EARLIEST_MODEL_YEAR = 1900
 LATEST_MODEL_YEAR = date.today().year + 1  # next year's models are already on sale
 MAX_ODOMETER_MILES = 1_000_000
 MIN_LISTINGS = 30  # the price model refuses to fit on fewer listings than this
+YEAR_WINDOW = 5  # with only a model year, compare against listings this many years either side
 
 # The exact values used in the listings data.
 Condition = Literal["excellent", "fair", "good", "like new", "new", "salvage"]
@@ -52,6 +53,12 @@ class VehicleQuery(BaseModel):
         min_length=1,
         max_length=200,
         description="Model name, e.g. 'camry'. Text label, no units.",
+    )
+    year: int | None = Field(
+        default=None,
+        ge=EARLIEST_MODEL_YEAR,
+        le=LATEST_MODEL_YEAR,
+        description="Model year of the vehicle being priced, in calendar years.",
     )
     year_min: int | None = Field(
         default=None,
@@ -105,13 +112,18 @@ class VehicleQuery(BaseModel):
 
     @model_validator(mode="after")
     def check_year_order(self) -> Self:
-        """Reject a year range that runs backwards."""
+        """Reject a year range that runs backwards, or that leaves out the car's own year."""
         if (
             self.year_min is not None
             and self.year_max is not None
             and self.year_min > self.year_max
         ):
             raise ValueError("year_min cannot be greater than year_max")
+        if self.year is not None:
+            if self.year_min is not None and self.year < self.year_min:
+                raise ValueError("year cannot be earlier than year_min")
+            if self.year_max is not None and self.year > self.year_max:
+                raise ValueError("year cannot be later than year_max")
         return self
 
 

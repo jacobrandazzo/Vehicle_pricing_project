@@ -17,7 +17,7 @@ run flags any difference.
 import sys
 from pathlib import Path
 
-from vehicle_pricing.data import filter_listings, load_data
+from vehicle_pricing.data import comparison_years, filter_listings, load_data
 from vehicle_pricing.model import fit_model, predict_price
 from vehicle_pricing.schemas import VehicleQuery
 
@@ -35,16 +35,16 @@ DESCRIPTIONS = [
 # The parsed query for each description, used by the offline run.
 OFFLINE_QUERIES = {
     "2015 Camry, 90,000 miles": VehicleQuery(
-        manufacturer="toyota", model="camry", year_min=2015, year_max=2015, odometer=90000
+        manufacturer="toyota", model="camry", year=2015, odometer=90000
     ),
     "1996-2000 Honda Civic 200,000 miles": VehicleQuery(
         manufacturer="honda", model="civic", year_min=1996, year_max=2000, odometer=200000
     ),
     "2016 Toyota Tacoma, 120,000 miles": VehicleQuery(
-        manufacturer="toyota", model="tacoma", year_min=2016, year_max=2016, odometer=120000
+        manufacturer="toyota", model="tacoma", year=2016, odometer=120000
     ),
     "2015 Honda Accord": VehicleQuery(
-        manufacturer="honda", model="accord", year_min=2015, year_max=2015
+        manufacturer="honda", model="accord", year=2015
     ),
 }
 
@@ -58,6 +58,7 @@ def format_result(description, query, rows_after_cleaning, fit):
     lines = [
         f"input: {description}",
         f"parsed query: {query.model_dump(exclude_none=True)}",
+        f"comparison years: {comparison_years(query)}",
         f"rows after cleaning: {rows_after_cleaning}",
         f"listings matched: {fit.n}",
         f"box-cox lambda_x (odometer): {fit.lambda_x!r}",
