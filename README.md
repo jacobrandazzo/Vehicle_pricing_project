@@ -38,7 +38,7 @@ The final model is slightly more accurate. Its ranges are honest (about 95%) and
 - **One model across ±5 model years, not one per year.** That's the only way to estimate an age effect, and it gives the mileage effect more data.
 - **Box-Cox λs chosen by maximum likelihood, not R².** When I chose them by R², the λ for price kept hitting the edge of the search range.
 - **A relative outlier rule, not a price floor.** 50 of the 51 Camrys under $3,000 had clean titles, so they look like down-payment ads, not damaged cars. But $2,000 is a real price for a 1998 Civic. The rule flags prices far from what the model expects for that car's mileage and age.
-- **Extra variables chosen by cross-validation.** Clean title and 4WD helped. 4WD mainly helps trucks: the Tacoma's error went from 11.3% to 9.8% with both added (clean title alone gave 11.1%). An age × mileage interaction and squared terms didn't help, because Box-Cox already handles the curvature. TODO(Jacob): these interaction and squared-term results aren't in docs/evaluation.md yet.
+- **Extra variables chosen by cross-validation.** Clean title and 4WD helped. 4WD mainly helps trucks: the Tacoma's error went from 11.3% to 9.8% with both added (clean title alone gave 11.1%). A mileage × age interaction and squared terms for mileage and age didn't help: in a [5-fold screen](docs/feature_screen.md), none changed any car's error by more than 0.23 points, and the average moved by 0.03 points at most. The Box-Cox transforms likely already handle the curvature.
 - **Missing title status is imputed as clean.** It affects 1.5% of listings, and clean is by far the most common value. Lien titles count as clean too, since a lien is a loan, not damage.
 - **One outlier-removal pass.** Cross-validation showed no real difference between one pass and three.
 - **Honest plots.** Each curve highlights the listings it describes and fades the rest. It turns dashed where the car's mileage is unusual for its age. That's hidden extrapolation: age and mileage are correlated (r ≈ 0.70), so those parts of the curve borrow their shape from other model years.
@@ -140,6 +140,7 @@ It takes a few minutes, doesn't need an API key, and rewrites `docs/evaluation.m
 - `make_figures.py`: saves the README images in `docs/`
 - `evaluate_models.py`: runs the cross-validation and writes `docs/evaluation.md` and `docs/evaluation.csv`
 - `docs/evaluation.md`, `docs/evaluation.csv`: the cross-validation results
+- `experiments/screen_extra_terms.py`: screens interaction and squared terms by cross-validation and writes `docs/feature_screen.md` (not part of the package)
 - `data/vehicles_slim.csv.gz`: the listings data (compressed, about 11 MB)
 - `pyproject.toml`, `requirements.txt`: package settings and the libraries `pip install -e .` installs
 - `.env.example`: a template for your `.env` file
