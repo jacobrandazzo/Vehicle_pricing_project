@@ -7,15 +7,20 @@ Fixtures defined here can be used by any test just by naming them as arguments.
 import os
 import socket
 
+import matplotlib
 import numpy as np
 import pandas as pd
 import pytest
+
+# Draw plots off-screen: tests never open windows, and work without a display.
+matplotlib.use("Agg")
 
 # Use a fake key so importing vehicle_pricing.agent never picks up the real one
 # from .env (load_dotenv doesn't override variables that are already set).
 os.environ["ANTHROPIC_API_KEY"] = "test-key-not-real"
 
-from vehicle_pricing.model import fit_model  # noqa: E402  (must come after the env var)
+from vehicle_pricing.data import vehicle_age  # noqa: E402  (must come after the env var)
+from vehicle_pricing.model import fit_model  # noqa: E402
 
 COLUMNS = ["manufacturer", "model", "year", "odometer", "price"]
 
@@ -67,20 +72,34 @@ def listings():
 
 @pytest.fixture
 def camry_listings():
-    """40 made-up 2015 Camry listings whose price falls as mileage rises.
+    """44 made-up Camry listings (model years 2010-2020) posted in April 2021.
 
-    The model needs at least 30 listings (MIN_LISTINGS), so this is bigger than
-    `listings`. A fixed random seed makes the "noise" the same on every run.
+    Price falls as mileage rises and as the car gets older. The model needs at
+    least 30 listings (MIN_LISTINGS), so this is bigger than `listings`. A fixed
+    random seed makes the "noise" the same on every run.
     """
     rng = np.random.default_rng(seed=0)
-    odometer = np.linspace(10_000, 200_000, 40)
-    price = 22_000 * np.exp(-odometer / 150_000) * rng.uniform(0.85, 1.15, size=40)
+    n = 44
+    year = np.repeat(np.arange(2010, 2021), 4)  # 4 listings per model year
+    posting_date = pd.Series(
+        pd.Timestamp("2021-04-01", tz="UTC") + pd.to_timedelta(np.arange(n) % 30, unit="D")
+    )
+    age = vehicle_age(posting_date, year)
+    odometer = rng.uniform(10_000, 200_000, size=n)
+    price = (
+        30_000
+        * np.exp(-odometer / 150_000)
+        * np.exp(-0.08 * age)
+        * rng.uniform(0.85, 1.15, size=n)
+    )
     return pd.DataFrame({
         "manufacturer": "toyota",
         "model": "camry",
-        "year": 2015,
+        "year": year,
         "odometer": odometer,
         "price": price.round(),
+        "posting_date": posting_date,
+        "age": age,
     })
 
 

@@ -5,20 +5,29 @@
     python make_baseline.py --offline  # only baseline_offline.txt (no API key needed)
 
 Online: each description goes through the same steps as main.py:
-parse_description() (calls Claude), then filter_listings(), fit_model() and
-predict_price(). Prices are written unrounded.
+parse_description() (calls Claude), then filter_listings(), drop_outliers(),
+fit_model() and predict_price(). Prices are written unrounded.
 
 Offline: the parsed queries in OFFLINE_QUERIES skip parse_description() and go
-straight into filter_listings(), fit_model() and predict_price(), with no call
-to Claude. They should match what Claude parsed in the online run; the online
+straight into filter_listings(), drop_outliers(), fit_model() and
+predict_price(), with no call to Claude. They should match what Claude parsed in the online run; the online
 run flags any difference.
 """
 
 import sys
 from pathlib import Path
 
-from vehicle_pricing.data import filter_listings, load_data
-from vehicle_pricing.model import fit_model, predict_price
+from vehicle_pricing.data import comparison_years, filter_listings, load_data
+from vehicle_pricing.model import (
+    DEFAULT_FEATURES,
+    car_model_year,
+    depreciation_curves,
+    drop_outliers,
+    fit_model,
+    predict_price,
+    query_age,
+    typical_mileage_range,
+)
 from vehicle_pricing.schemas import VehicleQuery
 
 ROOT = Path(__file__).parent
@@ -35,42 +44,68 @@ DESCRIPTIONS = [
 # The parsed query for each description, used by the offline run.
 OFFLINE_QUERIES = {
     "2015 Camry, 90,000 miles": VehicleQuery(
-        manufacturer="toyota", model="camry", year_min=2015, year_max=2015, odometer=90000
+        manufacturer="toyota", model="camry", year=2015, odometer=90000
     ),
     "1996-2000 Honda Civic 200,000 miles": VehicleQuery(
         manufacturer="honda", model="civic", year_min=1996, year_max=2000, odometer=200000
     ),
     "2016 Toyota Tacoma, 120,000 miles": VehicleQuery(
-        manufacturer="toyota", model="tacoma", year_min=2016, year_max=2016, odometer=120000
+        manufacturer="toyota", model="tacoma", year=2016, odometer=120000
     ),
     "2015 Honda Accord": VehicleQuery(
-        manufacturer="honda", model="accord", year_min=2015, year_max=2015
+        manufacturer="honda", model="accord", year=2015
     ),
 }
 
 
-def format_result(description, query, rows_after_cleaning, fit):
+def fit_listings(vehicles, query):
+    """Filter, drop outlier prices, and fit: the same pipeline as main.py.
+
+    Returns (listings matched, outliers dropped, fitted model).
+    """
+    matched = filter_listings(vehicles, query)
+    kept = drop_outliers(matched, features=DEFAULT_FEATURES)
+    return len(matched), len(matched) - len(kept), fit_model(kept, features=DEFAULT_FEATURES)
+
+
+def format_result(description, query, rows_after_cleaning, matched, dropped, fit):
     """One block of the baseline file. Floats use repr(), so they're unrounded.
 
     Without a mileage there's no price, so only the fit is recorded (main.py
     likewise shows only the plots in that case).
     """
+    curves = depreciation_curves(fit, query)
     lines = [
         f"input: {description}",
         f"parsed query: {query.model_dump(exclude_none=True)}",
+        f"comparison years: {comparison_years(query)}",
         f"rows after cleaning: {rows_after_cleaning}",
-        f"listings matched: {fit.n}",
+        f"listings matched: {matched}",
+        f"outliers dropped: {dropped}",
         f"box-cox lambda_x (odometer): {fit.lambda_x!r}",
+        f"box-cox lambda_age (age + 1): {fit.lambda_age!r}",
         f"box-cox lambda_y (price): {fit.lambda_y!r}",
+        f"features used: {fit.features}",
+        f"coefficients ({', '.join(fit.columns)}): {', '.join(repr(c) for c in fit.coef)}",
+        f"r-squared (transformed): {fit.r2!r}",
+        f"car's age used (years): {query_age(fit, query)!r}",
+        f"age effect t-stat: {curves.age_t_stat!r}",
+        f"age effect clear: {curves.age_effect_clear}",
+        "typical mileage for this model year: "
+        f"{typical_mileage_range(fit, car_model_year(fit, query))!r}",
     ]
     if query.odometer is None:
-        lines.append("predicted price: none (no mileage given)")
+        lines += [
+            "predicted price: none (no mileage given)",
+            "extrapolated: n/a (no mileage given)",
+        ]
     else:
         price = predict_price(fit, query)
         lines += [
             f"predicted price: {price.predicted_price!r}",
             f"lower bound: {price.lower_bound!r}",
             f"upper bound: {price.upper_bound!r}",
+            f"extrapolated: {price.extrapolated}",
         ]
     return "\n".join(lines)
 
@@ -87,8 +122,8 @@ def run_online():
         except ParseError as e:
             blocks.append(f"input: {description}\nPARSE ERROR: {e}")
             continue
-        fit = fit_model(filter_listings(vehicles, query))
-        block = format_result(description, query, len(vehicles), fit)
+        matched, dropped, fit = fit_listings(vehicles, query)
+        block = format_result(description, query, len(vehicles), matched, dropped, fit)
         if query != OFFLINE_QUERIES[description]:
             block += (
                 "\nNOTE: differs from the offline query "
@@ -106,9 +141,8 @@ def run_offline():
     blocks = ["Baseline: offline (no Claude; fixed parsed queries)"]
     for description in DESCRIPTIONS:
         query = OFFLINE_QUERIES[description]
-        subset = filter_listings(vehicles, query)
-        fit = fit_model(subset)
-        blocks.append(format_result(description, query, len(vehicles), fit))
+        matched, dropped, fit = fit_listings(vehicles, query)
+        blocks.append(format_result(description, query, len(vehicles), matched, dropped, fit))
 
     OFFLINE_FILE.write_text("\n\n".join(blocks) + "\n", encoding="utf-8")
     print(f"Wrote {OFFLINE_FILE}")

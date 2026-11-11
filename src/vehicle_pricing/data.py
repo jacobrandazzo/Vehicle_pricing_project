@@ -11,7 +11,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from vehicle_pricing.schemas import VehicleQuery
+from vehicle_pricing.schemas import YEAR_WINDOW, VehicleQuery
 
 log = logging.getLogger(__name__)
 
@@ -23,7 +23,7 @@ DATA_PATH = Path(__file__).resolve().parents[2] / "data" / "vehicles_slim.csv.gz
 KEEP_COLUMNS = frozenset({
     "price", "year", "manufacturer", "model", "odometer", "region", "state",
     "condition", "cylinders", "fuel", "title_status", "transmission",
-    "drive", "size", "type", "paint_color",
+    "drive", "size", "type", "paint_color", "posting_date",
 })
 
 # Rows that match on all of these are treated as duplicate postings.
@@ -31,6 +31,27 @@ DEDUP_COLUMNS = ["region", "year", "manufacturer", "model", "price", "odometer"]
 
 # VehicleQuery fields that match a column exactly (case-insensitive).
 CATEGORICAL_FIELDS = ("manufacturer", "model", "condition", "fuel", "transmission", "cylinders", "drive")
+
+
+def vehicle_age(posting_date: pd.Series, model_year: pd.Series) -> pd.Series:
+    """Return each vehicle's age in years (a decimal) on the day it was posted.
+
+    The posting date becomes a decimal year:
+    ``year + (day_of_year - 1) / days_in_that_year``, so 1 January 2021 is
+    2021.0 and 2 July 2021 is about 2021.5. The model year is treated as
+    1 January of that year. Age is the difference between the two.
+
+    The result is clipped at 0 because dealers list next year's models
+    early. A 2022 car posted in April 2021 would otherwise get an age of
+    about -0.7.
+    """
+    return (decimal_year(posting_date) - model_year).clip(lower=0)
+
+
+def decimal_year(dates: pd.Series) -> pd.Series:
+    """Dates as decimal years: ``year + (day_of_year - 1) / days_in_that_year``."""
+    days_in_year = np.where(dates.dt.is_leap_year, 366, 365)
+    return dates.dt.year + (dates.dt.day_of_year - 1) / days_in_year
 
 
 def clean_vehicles(
@@ -46,9 +67,12 @@ def clean_vehicles(
     odometers (1, 999999), missing values and duplicate postings. The default
     ranges are conservative starting points -- tune them to your data.
     """
-    required = ["price", "odometer", "year"]
+    required = ["price", "odometer", "year", "posting_date"]
     out = df.dropna(subset=required).copy()
     out["year"] = out["year"].astype(int)
+    # Postings mix time-zone offsets (-0400, -0700, ...), so parse them all to UTC.
+    out["posting_date"] = pd.to_datetime(out["posting_date"], utc=True)
+    out["age"] = vehicle_age(out["posting_date"], out["year"])
 
     max_year = year_range[1] if year_range[1] is not None else date.today().year + 1
     keep = (
@@ -102,18 +126,38 @@ def check_manufacturer(df: pd.DataFrame, query: VehicleQuery) -> None:
 def filter_listings(df: pd.DataFrame, query: VehicleQuery) -> pd.DataFrame:
     """Return the listings matching every filter set on the query.
 
-    Unset (None) fields don't filter. The year range is inclusive, and either
-    end may be unset. The query's odometer is the mileage being priced, not a
-    filter, so it is ignored here.
+    Unset (None) fields don't filter. Model years come from comparison_years();
+    the range is inclusive, and either end may be open. The query's odometer is
+    the mileage being priced, not a filter, so it is ignored here.
     """
     filters: dict[str, Any] = {
         field: getattr(query, field)
         for field in CATEGORICAL_FIELDS
         if getattr(query, field) is not None
     }
-    if query.year_min is not None or query.year_max is not None:
-        filters["year_range"] = (query.year_min, query.year_max)
+    year_range = comparison_years(query)
+    if year_range != (None, None):
+        filters["year_range"] = year_range
     return _filter_vehicles(df, **filters)
+
+
+def comparison_years(query: VehicleQuery) -> tuple[int | None, int | None]:
+    """Return the (earliest, latest) model years of the comparison listings.
+
+    This is the one place the comparison window is decided, so a later
+    lookup (e.g. by model generation) can replace it without touching
+    anything else.
+
+    - If the query sets year_min or year_max, they are returned as given
+      (either may be None, meaning that end is open).
+    - Otherwise, if it sets year, the window is year +/- YEAR_WINDOW.
+    - Otherwise there is no window: (None, None).
+    """
+    if query.year_min is not None or query.year_max is not None:
+        return query.year_min, query.year_max
+    if query.year is not None:
+        return query.year - YEAR_WINDOW, query.year + YEAR_WINDOW
+    return None, None
 
 
 def _filter_vehicles(
