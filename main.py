@@ -4,23 +4,10 @@ import matplotlib.pyplot as plt
 
 from vehicle_pricing.agent import ParseError, parse_description
 from vehicle_pricing.data import comparison_years, load_data
-from vehicle_pricing.pipeline import estimate, warning_message
+from vehicle_pricing.pipeline import describe_years, estimate, warning_message
 from vehicle_pricing.plots import plot_depreciation, plot_residuals
 
 QUIT_WORDS = ("quit", "exit", "done", "stop")
-
-
-def describe_years(low, high):
-    """The comparison window as words, e.g. '2010–2020 model years'."""
-    if low is None and high is None:
-        return "all model years"
-    if low is None:
-        return f"{high} and earlier model years"
-    if high is None:
-        return f"{low} and later model years"
-    if low == high:
-        return f"{low} model year"
-    return f"{low}–{high} model years"
 
 
 def main():

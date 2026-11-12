@@ -31,8 +31,15 @@ def offline_only(monkeypatch):
 
     Blocking socket connections means no Claude API call can get out, and
     blocking pandas.read_csv means load_data() can't read the real data file.
+    Connections to this machine itself (127.0.0.1) are allowed: on Windows,
+    asyncio opens one to build its event loop, which Streamlit's AppTest needs.
     """
-    def no_network(*args, **kwargs):
+    real_connect = socket.socket.connect
+
+    def no_network(sock, address, *args, **kwargs):
+        host = address[0] if isinstance(address, tuple) else address
+        if host in ("127.0.0.1", "::1", "localhost"):
+            return real_connect(sock, address, *args, **kwargs)
         raise RuntimeError("Tests must not use the network (no Claude API calls).")
 
     def no_csv(*args, **kwargs):

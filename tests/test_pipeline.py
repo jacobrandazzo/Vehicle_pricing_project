@@ -12,8 +12,15 @@ from vehicle_pricing.model import (
     fit_model,
     predict_price,
 )
-from vehicle_pricing.pipeline import WarningCode, estimate, warning_message
-from vehicle_pricing.schemas import VehicleQuery
+from vehicle_pricing.pipeline import (
+    TooFewListingsError,
+    WarningCode,
+    _require_enough_listings,
+    describe_years,
+    estimate,
+    warning_message,
+)
+from vehicle_pricing.schemas import MIN_LISTINGS, VehicleQuery
 
 
 def camry(**fields):
@@ -130,6 +137,62 @@ def test_unknown_make_raises(vehicles):
         estimate(vehicles, VehicleQuery(manufacturer="tesla", model="model 3"))
     # main.py catches ValueError, so the error must be one.
     assert issubclass(UnknownManufacturerError, ValueError)
+
+
+def test_too_few_matching_listings_raises_a_friendly_error(vehicles):
+    # 2015 and 2016 are 4 listings each: 8 in all, under MIN_LISTINGS.
+    query = camry(year_min=2015, year_max=2016, odometer=90_000)
+
+    with pytest.raises(TooFewListingsError) as excinfo:
+        estimate(vehicles, query)
+
+    message = str(excinfo.value)
+    assert "only 8 listings" in message
+    assert f"at least {MIN_LISTINGS}" in message
+    assert "Need at least" not in message  # not fit_model's blunt wording
+    # main.py catches ValueError, so the error must be one.
+    assert isinstance(excinfo.value, ValueError)
+
+
+def test_too_few_listings_left_after_dropping_outliers_raises(vehicles, monkeypatch):
+    # Stand-in for drop_outliers that throws away all but 10 listings.
+    monkeypatch.setattr(
+        "vehicle_pricing.pipeline.drop_outliers", lambda matched, **kwargs: matched.head(10)
+    )
+
+    with pytest.raises(TooFewListingsError, match="only 10 listings"):
+        estimate(vehicles, camry(year=2015, odometer=90_000))  # 44 match before the drop
+
+
+def test_no_matching_listings_says_none_were_found(vehicles):
+    # A make that is in the data, with a model that isn't.
+    query = VehicleQuery(manufacturer="toyota", model="cybertruck", year=2015)
+
+    with pytest.raises(TooFewListingsError) as excinfo:
+        estimate(vehicles, query)
+
+    message = str(excinfo.value)
+    assert "couldn't find any listings" in message
+    assert "0" not in message  # no "only 0 listings" and no "at least 30"
+
+
+def test_one_listing_is_singular():
+    with pytest.raises(TooFewListingsError, match=r"only 1 listing like that"):
+        _require_enough_listings(1)
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "expected"),
+    [
+        (2010, 2020, "2010–2020 model years"),
+        (2015, 2015, "2015 model year"),
+        (None, 2005, "2005 and earlier model years"),
+        (2018, None, "2018 and later model years"),
+        (None, None, "all model years"),
+    ],
+)
+def test_describe_years(low, high, expected):
+    assert describe_years(low, high) == expected
 
 
 def test_every_warning_code_has_a_message(vehicles):
