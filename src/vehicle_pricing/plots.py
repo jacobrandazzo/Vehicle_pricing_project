@@ -83,15 +83,13 @@ def plot_depreciation(
     ax_miles, ax_years = fig.subplots(1, 2, sharey=True)
     years = listings["year"]
     norm = Normalize(years.min(), years.max())
-    cars = _plural_name(title)
 
     # Left: price vs. mileage, at the car's age; highlight cars near its model year.
     mileage = curves.mileage_curve.to_frame()
-    near_year = (years - curves.car_year).abs() <= HIGHLIGHT_YEARS
-    low_year, high_year = curves.car_year - HIGHLIGHT_YEARS, curves.car_year + HIGHLIGHT_YEARS
+    near_year, near_year_label = _year_highlight(listings, curves, title)
     miles_scatter, miles_dots = _highlighted_scatter(
         ax_miles, listings["odometer"], listings["price"], years, near_year, norm,
-        f"{low_year}–{high_year} {cars} (highlighted)",
+        near_year_label,
     )
     miles_atypical = _draw_curve(ax_miles, mileage["odometer"], mileage)
     ax_miles.set(xlabel="Odometer (miles)", ylabel="Price")
@@ -100,17 +98,11 @@ def plot_depreciation(
 
     # Right: price vs. model year, at a fixed mileage.
     ages = curves.age_curve.to_frame()
-    jitter = np.random.default_rng(JITTER_SEED).uniform(
-        -JITTER_YEARS, JITTER_YEARS, size=len(listings)
-    )
-    fixed = curves.fixed_odometer
-    near_miles = (listings["odometer"] - fixed).abs() <= HIGHLIGHT_MILEAGE * fixed
-    low_miles, high_miles = (1 - HIGHLIGHT_MILEAGE) * fixed, (1 + HIGHLIGHT_MILEAGE) * fixed
+    jitter = _year_jitter(len(listings))
+    near_miles, near_miles_label = _mileage_highlight(listings, curves, title)
     _, years_dots = _highlighted_scatter(
-        ax_years, years + jitter, listings["price"], years, near_miles, norm,
-        f"{cars} with {low_miles / 1000:.0f}k–{high_miles / 1000:.0f}k miles (highlighted)",
+        ax_years, years + jitter, listings["price"], years, near_miles, norm, near_miles_label,
     )
-    whose = "this car's mileage" if curves.odometer_is_cars else "median mileage"
     years_atypical = _draw_curve(
         ax_years, ages["model_year"], ages, dashed_everywhere=not curves.age_effect_clear
     )
@@ -122,26 +114,23 @@ def plot_depreciation(
     top.set_xlabel("Age (years)")
     if not curves.age_effect_clear:
         ax_years.text(
-            0.5, 0.97, f"No clear age effect in these listings (t = {curves.age_t_stat:.2f})",
+            0.5, 0.97, _age_note(curves),
             transform=ax_years.transAxes, ha="center", va="top", fontsize=10,
             bbox={"boxstyle": "round", "facecolor": "lightyellow", "edgecolor": "0.5"},
         )
 
     if car.price is not None:
         yerr = [[car.price - car.lower], [car.upper - car.price]]
-        label = (f"This car: ${car.price:,.0f} "
-                 f"({1 - alpha:.0%} range ${car.lower:,.0f}–${car.upper:,.0f})")
         marker = {"yerr": yerr, "fmt": "o", "color": "black", "markersize": 8,
                   "markeredgecolor": "white", "markeredgewidth": 1.5, "capsize": 4,
-                  "zorder": 4, "label": label}
+                  "zorder": 4, "label": _car_label(curves)}
         ax_miles.errorbar(car.odometer, car.price, **marker)
         ax_years.errorbar(car.model_year, car.price, **marker)
 
     ax_miles.set_ylim(bottom=0)
     ax_miles.yaxis.set_major_formatter(DOLLARS)
     _legend(
-        ax_miles, miles_dots,
-        f"Median at age {curves.fixed_age:.1f} years ({car.model_year:.0f} model year)",
+        ax_miles, miles_dots, _mileage_curve_label(curves),
         band_label, curve_dashed=False, dashed_note=miles_atypical, loc="upper right",
     )
     # Newer (pricier) cars sit at the top right, so this legend goes top left,
@@ -149,7 +138,7 @@ def plot_depreciation(
     # is dashed for that reason, so the "few cars like this" entry is left out.
     below_note = {} if curves.age_effect_clear else {"bbox_to_anchor": (0, 0.9)}
     _legend(
-        ax_years, years_dots, f"Median at {curves.fixed_odometer:,.0f} miles ({whose})", band_label,
+        ax_years, years_dots, _age_curve_label(curves), band_label,
         curve_dashed=not curves.age_effect_clear,
         dashed_note=years_atypical and curves.age_effect_clear,
         loc="upper left", **below_note,
@@ -158,8 +147,7 @@ def plot_depreciation(
     colorbar = fig.colorbar(miles_scatter, ax=[ax_miles, ax_years], label="Model year")
     colorbar.locator = MaxNLocator(integer=True)  # whole years only, never "1998, 1998"
     colorbar.update_ticks()
-    span = f"{years.min()}" if years.min() == years.max() else f"{years.min()}–{years.max()}"
-    fig.suptitle(f"{title}: {len(listings):,} listings, model years {span}")
+    fig.suptitle(_title_text(title, listings))
     return fig
 
 
@@ -200,21 +188,90 @@ def _draw_curve(ax, x: pd.Series, curve: pd.DataFrame, *, dashed_everywhere: boo
     """
     x = x.to_numpy()
     typical = curve["typical"].to_numpy()
-    start = 0
-    for end in range(1, len(x) + 1):
-        if end < len(x) and typical[end] == typical[start]:
-            continue
-        run = slice(start, min(end + 1, len(x)))
-        solid = typical[start] and not dashed_everywhere
+    for run, is_typical in _typical_runs(typical):
+        solid = is_typical and not dashed_everywhere
         ax.plot(x[run], curve["price"].to_numpy()[run], color=CURVE_COLOR, linewidth=2,
                 linestyle="-" if solid else "--", zorder=3)
         ax.fill_between(
             x[run], curve["lower"].to_numpy()[run], curve["upper"].to_numpy()[run],
-            color=BAND_COLOR, alpha=BAND_ALPHA if typical[start] else ATYPICAL_BAND_ALPHA,
+            color=BAND_COLOR, alpha=BAND_ALPHA if is_typical else ATYPICAL_BAND_ALPHA,
             linewidth=0, zorder=2,
         )
-        start = end
     return not typical.all()
+
+
+# --- Plain data and text helpers, shared with plotly_charts.py (no drawing here) ---
+
+def _typical_runs(typical: np.ndarray) -> list[tuple[slice, bool]]:
+    """Split a curve's points into runs that are all typical or all not.
+
+    Returns (slice, is_typical) for each run, in order. Each slice also takes
+    the next run's first point, so the drawn pieces join up without gaps.
+    """
+    runs = []
+    start = 0
+    for end in range(1, len(typical) + 1):
+        if end < len(typical) and typical[end] == typical[start]:
+            continue
+        runs.append((slice(start, min(end + 1, len(typical))), bool(typical[start])))
+        start = end
+    return runs
+
+
+def _year_highlight(
+    listings: pd.DataFrame, curves: DepreciationCurves, title: str
+) -> tuple[pd.Series, str]:
+    """Left panel: listings within +/- HIGHLIGHT_YEARS of the car's model year, and their label."""
+    near = (listings["year"] - curves.car_year).abs() <= HIGHLIGHT_YEARS
+    low, high = curves.car_year - HIGHLIGHT_YEARS, curves.car_year + HIGHLIGHT_YEARS
+    return near, f"{low}–{high} {_plural_name(title)} (highlighted)"
+
+
+def _mileage_highlight(
+    listings: pd.DataFrame, curves: DepreciationCurves, title: str
+) -> tuple[pd.Series, str]:
+    """Right panel: listings within +/- HIGHLIGHT_MILEAGE of the fixed odometer, and their label."""
+    fixed = curves.fixed_odometer
+    near = (listings["odometer"] - fixed).abs() <= HIGHLIGHT_MILEAGE * fixed
+    low, high = (1 - HIGHLIGHT_MILEAGE) * fixed, (1 + HIGHLIGHT_MILEAGE) * fixed
+    label = f"{_plural_name(title)} with {low / 1000:.0f}k–{high / 1000:.0f}k miles (highlighted)"
+    return near, label
+
+
+def _year_jitter(n: int) -> np.ndarray:
+    """Sideways offsets (in model years) that spread one year's listings apart; always the same."""
+    return np.random.default_rng(JITTER_SEED).uniform(-JITTER_YEARS, JITTER_YEARS, size=n)
+
+
+def _title_text(title: str, listings: pd.DataFrame) -> str:
+    """'Toyota Camry: 1,066 listings, model years 2010–2020'."""
+    years = listings["year"]
+    span = f"{years.min()}" if years.min() == years.max() else f"{years.min()}–{years.max()}"
+    return f"{title}: {len(listings):,} listings, model years {span}"
+
+
+def _mileage_curve_label(curves: DepreciationCurves) -> str:
+    """What the mileage curve holds fixed: the car's age and model year."""
+    return (f"Median at age {curves.fixed_age:.1f} years "
+            f"({curves.car.model_year:.0f} model year)")
+
+
+def _age_curve_label(curves: DepreciationCurves) -> str:
+    """What the age curve holds fixed: the car's mileage, or the median mileage."""
+    whose = "this car's mileage" if curves.odometer_is_cars else "median mileage"
+    return f"Median at {curves.fixed_odometer:,.0f} miles ({whose})"
+
+
+def _car_label(curves: DepreciationCurves) -> str:
+    """'This car: $13,598 (95% range $9,688–$17,690)'. Only when the car has a price."""
+    car = curves.car
+    return (f"This car: ${car.price:,.0f} "
+            f"({1 - curves.alpha:.0%} range ${car.lower:,.0f}–${car.upper:,.0f})")
+
+
+def _age_note(curves: DepreciationCurves) -> str:
+    """The note shown when the listings show no clear age effect."""
+    return f"No clear age effect in these listings (t = {curves.age_t_stat:.2f})"
 
 
 def _highlighted_scatter(ax, x, y, years, highlight, norm, label: str) -> tuple:
