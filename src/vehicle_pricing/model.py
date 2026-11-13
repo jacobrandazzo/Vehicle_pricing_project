@@ -148,6 +148,10 @@ class FittedModel(BaseModel):
     typical_mileage: list[TypicalMileage]  # one entry per model year in the listings
 
 
+class NoAgeSpreadError(ValueError):
+    """The listings span too few model years to fit an age effect. str(e) is safe to show users."""
+
+
 def fit_model(
     df: pd.DataFrame,
     *,
@@ -197,7 +201,7 @@ def fit_model(
     if (x <= 0).any() or (y <= 0).any() or (age < 0).any():
         raise ValueError("odometer and price must be positive, and age not negative")
     if np.ptp(age) < MIN_AGE_SPREAD:
-        raise ValueError(
+        raise NoAgeSpreadError(
             "These listings are all about the same age, so I can't tell how price "
             "changes with age. The model needs listings from several model years; "
             "try a wider year range."

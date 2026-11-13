@@ -7,15 +7,23 @@ st.session_state.
 """
 
 import logging
+import os
 
 import anthropic
 import pandas as pd
 import streamlit as st
 
 from vehicle_pricing.agent import ParseError, parse_description
-from vehicle_pricing.data import comparison_years, load_data
+from vehicle_pricing.data import UnknownManufacturerError, comparison_years, load_data
+from vehicle_pricing.limits import (
+    MAX_CALLS_PER_SESSION,
+    MAX_DESCRIPTION_CHARS,
+    DailyCounter,
+)
+from vehicle_pricing.model import NoAgeSpreadError
 from vehicle_pricing.pipeline import (
     Estimate,
+    TooFewListingsError,
     WarningCode,
     describe_years,
     estimate,
@@ -45,6 +53,63 @@ def get_vehicles() -> pd.DataFrame:
     nothing may change it. estimate() only reads it.
     """
     return load_data()
+
+
+@st.cache_resource
+def get_daily_counter() -> DailyCounter:
+    """One counter for the whole server: every visitor's session gets this same object.
+
+    A server restart (a redeploy, or the host putting the app to sleep) starts
+    a new counter at 0, which can only loosen the cap. The spending limit in
+    the Anthropic Console is the real backstop.
+    """
+    return DailyCounter()
+
+
+def calls_left() -> int:
+    """How many Claude calls this visit has left."""
+    return MAX_CALLS_PER_SESSION - st.session_state.calls_used
+
+
+def use_a_call(text: str) -> str | None:
+    """Check the limits and, if they all pass, count one Claude call.
+
+    Returns the message to show instead if a limit stops the call, else None.
+    Called just before parse_description, and counts whether or not the call
+    then succeeds: a failed call costs tokens too. The session limit is checked
+    before the daily one, so a visitor who is out of calls doesn't use up the
+    day's.
+    """
+    if len(text) > MAX_DESCRIPTION_CHARS:  # also checked here: buttons and tests bypass max_chars
+        return f"Please keep the description under {MAX_DESCRIPTION_CHARS} characters."
+    if calls_left() <= 0:
+        return (f"You've used all {MAX_CALLS_PER_SESSION} descriptions for this visit. "
+                "Thanks for trying it!")
+    if not get_daily_counter().try_use():
+        return "The app has reached today's limit. Please come back tomorrow."
+    st.session_state.calls_used += 1
+    return None
+
+
+def configure_api_key() -> bool:
+    """Say whether a Claude API key is available: Streamlit secrets first, then the environment.
+
+    st.secrets reads .streamlit/secrets.toml locally, or the Secrets settings on
+    Streamlit Community Cloud. A key found there is copied into the environment,
+    where the Anthropic client reads it, so it wins over a key from .env
+    (which agent.py's load_dotenv() put in the environment). The key itself is
+    never shown or logged.
+    """
+    try:
+        secret = st.secrets.get("ANTHROPIC_API_KEY")
+    except FileNotFoundError:  # no secrets file at all: fine, use the environment
+        secret = None
+    except Exception as e:  # a broken secrets file: log only the error's type, not its text
+        log.warning("Could not read Streamlit secrets (%s); using the environment", type(e).__name__)
+        secret = None
+    if secret:
+        os.environ["ANTHROPIC_API_KEY"] = str(secret)
+    return bool(os.environ.get("ANTHROPIC_API_KEY"))
 
 
 def plain(text: str) -> str:
@@ -87,6 +152,10 @@ def reply_to(text: str) -> dict:
     def failure(message: str) -> dict:
         return {"role": "assistant", "text": message, "warnings": []}
 
+    refusal = use_a_call(text)
+    if refusal is not None:
+        return failure(refusal)
+
     try:
         query = parse_description(text, st.session_state.previous)
         est = estimate(vehicles, query)
@@ -97,7 +166,7 @@ def reply_to(text: str) -> dict:
         return failure(
             "The description service isn't responding right now. Please try again in a minute."
         )
-    except ValueError as e:  # unknown make, or too few listings: the wording is user-safe
+    except (UnknownManufacturerError, TooFewListingsError, NoAgeSpreadError) as e:  # worded for visitors
         return failure(str(e))
     except Exception:
         log.exception("Unexpected error while answering %r", text)
@@ -202,6 +271,9 @@ def use_example(text: str) -> None:
 st.session_state.setdefault("messages", [])  # every message so far, oldest first
 st.session_state.setdefault("previous", None)  # the last successful VehicleQuery
 st.session_state.setdefault("latest_estimate", None)  # its Estimate, for the charts; None after a failure
+# Claude calls this visit has made. A page refresh starts a new session at 0,
+# which is why there is also a daily cap shared by everyone.
+st.session_state.setdefault("calls_used", 0)
 
 st.title("Used Car Price Estimator")
 st.write(
@@ -212,18 +284,30 @@ st.write(
 show_about()  # before the data loads, so the sidebar is there while the spinner runs
 vehicles = get_vehicles()
 
+has_key = configure_api_key()
+if not has_key:
+    st.info("Text input is unavailable right now.")
+can_send = has_key and calls_left() > 0
+
 for column, example in zip(st.columns(len(EXAMPLES)), EXAMPLES):
-    column.button(example, on_click=use_example, args=(example,), width="stretch")
+    column.button(example, on_click=use_example, args=(example,), width="stretch",
+                  disabled=not can_send)
 
 for message in st.session_state.messages:
     show_message(message)
 
 # chat_input returns the text on the run where the user sends it, else None.
 # An example button parked its text in `pending`, so a click acts like typing.
-text = st.chat_input("Describe a car, e.g. '2015 Toyota Camry, 90,000 miles'")
+if not has_key:
+    placeholder = "Text input is unavailable right now"
+elif calls_left() <= 0:
+    placeholder = f"You've used all {MAX_CALLS_PER_SESSION} descriptions for this visit"
+else:
+    placeholder = "Describe a car, e.g. '2015 Toyota Camry, 90,000 miles'"
+text = st.chat_input(placeholder, max_chars=MAX_DESCRIPTION_CHARS, disabled=not can_send)
 text = text or st.session_state.pop("pending", None)
 
-if text:
+if text and has_key:  # checked here too: a disabled widget only stops the browser
     user_message = {"role": "user", "text": text}
     st.session_state.messages.append(user_message)
     show_message(user_message)
@@ -233,7 +317,14 @@ if text:
             answer = reply_to(text)
         show_body(answer)
     st.session_state.messages.append(answer)
+    # The input above was drawn before this call was counted. If that was the
+    # last one, rerun at once so the page shows the input disabled.
+    if calls_left() <= 0:
+        st.rerun()
 
 # Last on the page, so the charts sit under the newest answer.
 if st.session_state.latest_estimate is not None:
     show_charts(st.session_state.latest_estimate)
+
+if has_key:  # the last element, so it sits just above the chat input
+    st.caption(f"{max(calls_left(), 0)} of {MAX_CALLS_PER_SESSION} descriptions left")

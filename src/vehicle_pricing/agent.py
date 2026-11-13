@@ -1,5 +1,7 @@
 """Turn a plain-English vehicle description into a validated VehicleQuery using Claude."""
 
+from functools import cache
+
 import anthropic
 from dotenv import load_dotenv
 from pydantic import ValidationError
@@ -10,8 +12,17 @@ __all__ = ["ParseError", "parse_description"]
 
 load_dotenv()  # lets a local .env supply ANTHROPIC_API_KEY; real environment variables win
 
-# Created once and reused; reads ANTHROPIC_API_KEY from the environment.
-_client = anthropic.Anthropic()
+
+@cache
+def _get_client() -> anthropic.Anthropic:
+    """The Anthropic client: created on the first call, then reused (that is what @cache does).
+
+    It is not created when this module is imported, so a website on a host with
+    no key can still load and show a notice instead of crashing at import time.
+    The client reads ANTHROPIC_API_KEY from the environment.
+    """
+    return anthropic.Anthropic()
+
 
 _MODEL = "claude-haiku-5-5"
 _MAX_TOKENS = 300  # one small tool call; nothing else is generated
@@ -60,7 +71,7 @@ def parse_description(text: str, previous: VehicleQuery | None = None) -> Vehicl
     the fields, or returns fields that fail validation. API failures (network,
     authentication, rate limits) are raised as the SDK's own exceptions.
     """
-    response = _client.messages.create(
+    response = _get_client().messages.create(
         model=_MODEL,
         max_tokens=_MAX_TOKENS,
         system=_SYSTEM_PROMPT,

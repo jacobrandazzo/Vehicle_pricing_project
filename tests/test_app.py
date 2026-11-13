@@ -16,6 +16,7 @@ import streamlit as st
 from streamlit.testing.v1 import AppTest
 
 from vehicle_pricing.agent import ParseError
+from vehicle_pricing.limits import MAX_CALLS_PER_SESSION, MAX_DESCRIPTION_CHARS
 from vehicle_pricing.schemas import VehicleQuery
 
 APP = str(Path(__file__).resolve().parents[1] / "app.py")
@@ -47,15 +48,24 @@ def parse(monkeypatch):
 
 
 @pytest.fixture
-def app(monkeypatch, vehicles, parse):
-    """app.py loaded and run once, with the fake listings and the fake parser."""
+def make_app(monkeypatch, vehicles, parse):
+    """A function that loads and runs app.py once, with the fake listings and the fake parser.
+
+    A test that must change something first (e.g. remove the API key) calls it
+    after making the change.
+    """
     monkeypatch.setattr("vehicle_pricing.data.load_data", lambda: vehicles)
-    # cache_resource keeps its result for the whole process, so a cached copy
-    # from an earlier test would otherwise be reused.
+    # cache_resource keeps its results for the whole process, so the listings
+    # and the daily counter from an earlier test would otherwise be reused.
     st.cache_resource.clear()
-    at = AppTest.from_file(APP, default_timeout=60).run()
-    yield at
+    yield lambda: AppTest.from_file(APP, default_timeout=60).run()
     st.cache_resource.clear()
+
+
+@pytest.fixture
+def app(make_app):
+    """app.py loaded and run once, with the fake listings, the fake parser and the fake key."""
+    return make_app()
 
 
 def texts(at):
@@ -119,6 +129,53 @@ def test_no_matching_listings_gets_a_friendly_message(app, parse):
 
     assert "couldn't find any listings like that" in texts(app)[-1]
     assert app.get("plotly_chart") == []
+
+
+def test_after_20_descriptions_the_next_is_refused_without_calling_claude(app, parse):
+    for i in range(MAX_CALLS_PER_SESSION):
+        send(app, f"2015 Camry, {i} miles")
+    assert parse.call_count == MAX_CALLS_PER_SESSION
+    assert app.chat_input[0].disabled  # shown as used up straight after the 20th
+    assert [c.value for c in app.main.caption] == ["0 of 20 descriptions left"]
+
+    # The input is disabled, so send the 21st the way an example button would.
+    app.session_state["pending"] = "2015 Camry, 21 miles"
+    app.run()
+
+    assert texts(app)[-1] == (
+        "You've used all 20 descriptions for this visit. Thanks for trying it!"
+    )
+    assert parse.call_count == MAX_CALLS_PER_SESSION  # Claude was not called again
+
+
+def test_a_too_long_description_is_refused_without_calling_claude(app, parse):
+    # The chat input trims typed text to 200 characters, so bypass it as a button could.
+    app.session_state["pending"] = "x" * (MAX_DESCRIPTION_CHARS + 1)
+    app.run()
+
+    assert texts(app)[-1] == "Please keep the description under 200 characters."
+    parse.assert_not_called()
+    assert [c.value for c in app.main.caption] == ["20 of 20 descriptions left"]  # not counted
+
+
+def test_without_a_key_the_input_is_disabled_and_a_notice_shows(make_app, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY")  # put back after the test
+
+    at = make_app()
+
+    assert not at.exception
+    assert [i.value for i in at.main.info] == ["Text input is unavailable right now."]
+    assert at.chat_input[0].disabled
+    assert all(button.disabled for button in at.button)
+
+
+def test_an_unexpected_value_error_is_not_shown_to_the_user(app, parse):
+    parse.side_effect = ValueError("internal detail 42")
+
+    send(app, "2015 Camry, 90,000 miles")
+
+    assert texts(app)[-1] == "Something went wrong on my side. Please try again."
+    assert "internal detail 42" not in " ".join(texts(app))
 
 
 def test_an_example_button_acts_like_typing_it(app, parse):

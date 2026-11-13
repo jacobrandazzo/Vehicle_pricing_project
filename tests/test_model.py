@@ -7,6 +7,7 @@ import scipy.stats as stats
 
 from vehicle_pricing.data import vehicle_age
 from vehicle_pricing.model import (
+    NoAgeSpreadError,
     _half_width,
     car_model_year,
     depreciation_curves,
@@ -267,3 +268,12 @@ def test_rare_but_real_feature_is_kept():
 
     assert model.features == ["clean_title"]
     assert model.coef[model.columns.index("clean_title")] > 0
+
+
+def test_listings_all_the_same_age_raise_no_age_spread_error(camry_listings):
+    same_age = camry_listings.assign(age=5.3)  # 44 listings, so the count check passes
+
+    with pytest.raises(NoAgeSpreadError, match="try a wider year range"):
+        fit_model(same_age)
+    # main.py catches ValueError, so the error must be one.
+    assert issubclass(NoAgeSpreadError, ValueError)
