@@ -5,6 +5,7 @@ real listings are replaced: load_data returns the made-up Camry listings, and
 parse_description is a stand-in that records how it was called.
 """
 
+import os
 import re
 from pathlib import Path
 from unittest.mock import Mock
@@ -52,13 +53,20 @@ def make_app(monkeypatch, vehicles, parse):
     """A function that loads and runs app.py once, with the fake listings and the fake parser.
 
     A test that must change something first (e.g. remove the API key) calls it
-    after making the change.
+    after making the change. `secrets` are given to AppTest for the run, in
+    place of any secrets file (conftest.py makes sure none is ever read).
     """
     monkeypatch.setattr("vehicle_pricing.data.load_data", lambda: vehicles)
     # cache_resource keeps its results for the whole process, so the listings
     # and the daily counter from an earlier test would otherwise be reused.
     st.cache_resource.clear()
-    yield lambda: AppTest.from_file(APP, default_timeout=60).run()
+
+    def make(secrets=None):
+        at = AppTest.from_file(APP, default_timeout=60)
+        at.secrets.update(secrets or {})
+        return at.run()
+
+    yield make
     st.cache_resource.clear()
 
 
@@ -167,6 +175,19 @@ def test_without_a_key_the_input_is_disabled_and_a_notice_shows(make_app, monkey
     assert [i.value for i in at.main.info] == ["Text input is unavailable right now."]
     assert at.chat_input[0].disabled
     assert all(button.disabled for button in at.button)
+
+
+def test_a_key_in_secrets_is_found(make_app, monkeypatch):
+    monkeypatch.delenv("ANTHROPIC_API_KEY")  # so only the secrets can supply a key
+
+    at = make_app(secrets={"ANTHROPIC_API_KEY": "fake-secrets-key"})
+
+    assert not at.exception
+    assert at.main.info == []  # no "unavailable" notice
+    assert not at.chat_input[0].disabled
+    # Compared into a bool first: a failing `a == b` would print both values.
+    copied = os.environ.get("ANTHROPIC_API_KEY") == "fake-secrets-key"
+    assert copied, "the key from secrets was not copied into the environment"
 
 
 def test_an_unexpected_value_error_is_not_shown_to_the_user(app, parse):

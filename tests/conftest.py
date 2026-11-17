@@ -17,12 +17,36 @@ matplotlib.use("Agg")
 
 # Use a fake key so importing vehicle_pricing.agent never picks up the real one
 # from .env (load_dotenv doesn't override variables that are already set).
-os.environ["ANTHROPIC_API_KEY"] = "test-key-not-real"
+os.environ["ANTHROPIC_API_KEY"] = "test-key-not-real"  # same as FAKE_API_KEY below
+
+import streamlit as st  # noqa: E402
+from streamlit.runtime.secrets import Secrets  # noqa: E402
 
 from vehicle_pricing.data import vehicle_age  # noqa: E402  (must come after the env var)
 from vehicle_pricing.model import fit_model  # noqa: E402
 
 COLUMNS = ["manufacturer", "model", "year", "odometer", "price"]
+FAKE_API_KEY = "test-key-not-real"
+
+
+@pytest.fixture(autouse=True)
+def no_real_secrets(monkeypatch):
+    """Runs around every test: no secrets file or .env on this machine can reach a test.
+
+    Streamlit reads secrets.toml from the home folder's .streamlit, the
+    project's .streamlit and the script's folder, the first time st.secrets is
+    used, and copies each top-level value into os.environ. Here st.secrets is
+    swapped for one that already holds nothing, so no file is ever read. (This
+    is how AppTest itself supplies secrets: a Secrets object with its contents
+    set in advance.) A test that sets `at.secrets` still gets those for that run.
+
+    The fake key is set with monkeypatch, which puts the old value back after
+    the test even if the app overwrote it directly with os.environ[...] = ...
+    """
+    empty = Secrets()
+    empty._secrets = {}  # "already loaded", so the files are never parsed
+    monkeypatch.setattr(st, "secrets", empty)
+    monkeypatch.setenv("ANTHROPIC_API_KEY", FAKE_API_KEY)
 
 
 @pytest.fixture(autouse=True)
