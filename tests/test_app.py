@@ -92,7 +92,10 @@ def test_description_gets_a_price_line_and_charts(app):
     send(app, "2015 Camry, 90,000 miles")
 
     assert any(PRICE_LINE.search(t) for t in texts(app))
-    assert len(app.get("plotly_chart")) == 1  # the residuals chart waits inside its expander
+    # Mileage and age charts side by side; the residuals chart waits inside its expander.
+    assert len(app.get("plotly_chart")) == 2
+    assert [len(c.get("plotly_chart")) for c in app.columns if c.get("plotly_chart")] == [1, 1]
+    assert [h.value.split(":")[0] for h in app.main.subheader] == ["Toyota Camry"]  # their title
     assert [e.label for e in app.expander] == ["Residuals and method"]
     assert any("Built by Jacob Randazzo" in t for t in (m.value for m in app.sidebar.markdown))
 

@@ -29,7 +29,8 @@ from vehicle_pricing.pipeline import (
     estimate,
     warning_message,
 )
-from vehicle_pricing.plotly_charts import depreciation_figure, residuals_figure
+from vehicle_pricing.plotly_charts import age_figure, mileage_figure, residuals_figure
+from vehicle_pricing.plots import _title_text
 
 log = logging.getLogger(__name__)
 
@@ -196,17 +197,28 @@ def show_message(message: dict) -> None:
 
 
 def show_charts(est: Estimate) -> None:
-    """The depreciation chart, and the residuals chart inside a collapsed expander.
+    """The mileage and age charts under one title, and the residuals chart in a collapsed expander.
 
     Only the latest answer gets charts: they are the heavy part of a rerun.
     theme=None keeps each figure's own colours instead of Streamlit's restyling.
     """
     title = " ".join(part for part in (est.query.manufacturer, est.query.model) if part).title()
-    st.plotly_chart(
-        depreciation_figure(est.listings, est.curves, title=title),
-        theme=None,
-        alt=f"Price against mileage and against model year for {title}, with the car marked",
-    )
+    # The long title sits above the charts, not inside them, so a narrow chart never clips it.
+    st.subheader(plain(_title_text(title, est.listings)))
+    # Side by side on a wide screen; st.columns stacks them on a phone (640px or less).
+    mileage_col, age_col = st.columns(2)
+    with mileage_col:
+        st.plotly_chart(
+            mileage_figure(est.listings, est.curves, title=title),
+            theme=None, width="stretch",
+            alt=f"Price against mileage for {title}, with the car marked",
+        )
+    with age_col:
+        st.plotly_chart(
+            age_figure(est.listings, est.curves, title=title),
+            theme=None, width="stretch",
+            alt=f"Price against model year for {title}, with the car marked",
+        )
 
     # An expander's body runs on every rerun even while collapsed. on_change="rerun"
     # makes `.open` say whether the user has opened it, so the chart is built only then.
