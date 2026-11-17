@@ -8,10 +8,18 @@ version = "0.1.0"
 description = "Estimates used car prices from mileage using Craigslist listings."
 readme = "README.md"
 requires-python = ">=3.12"
-dynamic = ["dependencies"]
-
-[tool.setuptools.dynamic]
-dependencies = { file = ["requirements.txt"] }
+dependencies = [
+    "anthropic==2.3.0",
+    "matplotlib==3.11.2",
+    "numpy==2.5.4",
+    "pandas==3.1.0",
+    "plotly==7.1.0",
+    "pydantic==2.14.3",
+    "pytest==9.2.0",
+    "python-dotenv==1.2.4",
+    "scipy==1.18.1",
+    "streamlit==1.67.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]

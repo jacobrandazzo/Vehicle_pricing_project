@@ -142,7 +142,8 @@ It takes a few minutes, doesn't need an API key, and rewrites `docs/evaluation.m
 - `docs/evaluation.md`, `docs/evaluation.csv`: the cross-validation results
 - `experiments/screen_extra_terms.py`: screens interaction and squared terms by cross-validation and writes `docs/feature_screen.md` (not part of the package)
 - `data/vehicles_slim.csv.gz`: the listings data (compressed, about 11 MB)
-- `pyproject.toml`, `requirements.txt`: package settings and the libraries `pip install -e .` installs
+- `pyproject.toml`: package settings and the pinned libraries `pip install -e .` installs
+- `requirements.txt`: a single `-e .` line, so `pip install -r requirements.txt` (what Streamlit Community Cloud runs) installs the same thing
 - `.env.example`: a template for your `.env` file
 
 `vehicles.csv`, the full 1.4 GB dataset, isn't in the repo and isn't needed to run the project. The listings come from the [Used Cars Dataset](https://www.kaggle.com/datasets/austinreese/craigslist-carstrucks-data) by Austin Reese on Kaggle (version 10), scraped from Craigslist: 426,880 listings posted in April–May 2021. The dataset has since been updated, so the current download differs; select version 10 in the dataset's version history to get the same file. `data/vehicles_slim.csv.gz` Keeps a subset of the columns.
