@@ -2,7 +2,13 @@
 
 I describe a used car in plain English, and Claude reads the description. A statistical model I built on about 320,000 Craigslist listings from 2021 then estimates the car's price with a 95% range. It also shows how the car loses value with mileage and with age.
 
-![Toyota Camry depreciation curves](docs/camry_depreciation.png)
+**Try it live: [vehiclepricingproject-jacobrandazzo.streamlit.app](https://vehiclepricingproject-jacobrandazzo.streamlit.app/)**
+
+On the website you describe a car in plain English and get its price with a 95% range, plus charts of how it depreciates with mileage and with age. If nobody has used it for a while, it may take about a minute to wake up, because the free hosting puts idle apps to sleep.
+
+![The website answering "2016 Toyota Tacoma, 120k miles" with $26,750 (95% range $18,083 to $35,322), then the follow-up "How about 4wd?" with $29,217 (95% range $21,952 to $36,667)](docs/Website_answer.png)
+
+![The website's charts for the 4WD 2016 Tacoma: price vs. mileage and price vs. model year from 660 listings, with the car marked on both curves and its 95% range](docs/Website_charts.png)
 
 ## How well it works
 
@@ -52,11 +58,13 @@ The final model is slightly more accurate. Its ranges are honest (about 95%) and
 - Coverage is measured on plausible listings. On all listings, including junk ads, it's about 91%.
 - When the user gives no drivetrain, the price is averaged over the 4WD/2WD mix in the listings.
 
+## About the website
+
+The website is a Streamlit app (`app.py`) that runs the same pipeline as the terminal app. Claude Haiku turns each description into a query, and `estimate()` in `pipeline.py` does the rest. Every description is a paid API call, so to keep the bill small each visitor gets 20 descriptions, the whole site gets 500 a day, and a description can be at most 200 characters. The API key lives in Streamlit's secrets settings, never in the repo. The website's charts are interactive Plotly charts (hover over a dot to see that listing), while the terminal app and the images in `docs/` use matplotlib.
+
 ## Future work
 
 - A comparison window based on the car's generation instead of ±5 model years: Claude looks up the generation's years on the web, and the result is cached. This eliminates the bias introduced by new generations being priced differently
-- A website: a single `estimate()` pipeline function, a JSON API, and interactive Plotly charts.
-
 
 ## Setup (once)
 
@@ -99,7 +107,11 @@ Describe a vehicle, for example:
 
 It prints the estimated price and its 95% range, then opens two plot windows: the depreciation curves (your vehicle marked on them), and the residuals. Close both windows to ask again; typing `quit` exits.
 
-The depreciation window shows price against mileage at your vehicle's age (left), and price against model year at your vehicle's mileage (right), like the Camry chart at the top. When the listings show no clear age effect, the age curve is dashed and the panel says so:
+The depreciation window shows price against mileage at your vehicle's age (left), and price against model year at your vehicle's mileage (right):
+
+![Toyota Camry depreciation curves](docs/camry_depreciation.png)
+
+When the listings show no clear age effect, the age curve is dashed and the panel says so:
 
 ![Honda Civic depreciation curves](docs/civic_depreciation.png)
 
@@ -110,6 +122,20 @@ A description needs at least a make or model. Without a mileage you get the plot
 Each description sends one request to the Anthropic API, which is billed to your API key.
 
 In VS Code, open this folder. If it asks, select the `venv` interpreter, then open `main.py` and press Run.
+
+## Run the website locally
+
+With the venv activated, install the libraries (the same ones `pip install -e .` installs):
+```
+pip install -r requirements.txt
+```
+
+The website needs the API key too. If you already made `.env` in Setup, it uses that. Or copy `.streamlit/secrets.toml.example` to `.streamlit/secrets.toml` and paste your key there. Git ignores both files. Then run:
+```
+streamlit run app.py
+```
+
+It opens in your browser at http://localhost:8501. The same limits as the live site apply.
 
 ## Testing the model without the API
 
@@ -129,12 +155,16 @@ It takes a few minutes, doesn't need an API key, and rewrites `docs/evaluation.m
 
 ## Files
 
-- `main.py`: the terminal app, and the file you run
+- `main.py`: the terminal app
+- `app.py`: the website (a Streamlit app)
 - `src/vehicle_pricing/agent.py`: asks Claude to turn a description into a `VehicleQuery`
 - `src/vehicle_pricing/schemas.py`: the `VehicleQuery` and `PriceResult` data shapes
 - `src/vehicle_pricing/data.py`: loads and cleans the listings, and filters them for a query
 - `src/vehicle_pricing/model.py`: fits price on mileage, age and the extra variables, predicts a price with its range, and builds the depreciation curves
-- `src/vehicle_pricing/plots.py`: the depreciation and residual plots
+- `src/vehicle_pricing/pipeline.py`: `estimate()`, which runs a query from filtering to the price and curves, used by both apps
+- `src/vehicle_pricing/limits.py`: the website's limits (20 descriptions per visitor, 500 a day for the site, 200 characters each)
+- `src/vehicle_pricing/plots.py`: the depreciation and residual plots (matplotlib, for the terminal app and `docs/`)
+- `src/vehicle_pricing/plotly_charts.py`: the same charts as interactive Plotly figures, for the website
 - `src/vehicle_pricing/evaluation.py`: the cross-validation and the model versions it compares
 - `make_baseline.py`: writes `baseline.txt` and `baseline_offline.txt`, reference results for checking changes
 - `make_figures.py`: saves the README images in `docs/`
@@ -145,5 +175,8 @@ It takes a few minutes, doesn't need an API key, and rewrites `docs/evaluation.m
 - `pyproject.toml`: package settings and the pinned libraries `pip install -e .` installs
 - `requirements.txt`: a single `-e .` line, so `pip install -r requirements.txt` (what Streamlit Community Cloud runs) installs the same thing
 - `.env.example`: a template for your `.env` file
+- `.streamlit/secrets.toml.example`: a template for the website's `.streamlit/secrets.toml`
+- `tests/`: the pytest tests (run `pytest`)
+- `docs/Website_answer.png`, `docs/Website_charts.png`: the website screenshots at the top
 
 `vehicles.csv`, the full 1.4 GB dataset, isn't in the repo and isn't needed to run the project. The listings come from the [Used Cars Dataset](https://www.kaggle.com/datasets/austinreese/craigslist-carstrucks-data) by Austin Reese on Kaggle (version 10), scraped from Craigslist: 426,880 listings posted in April–May 2021. The dataset has since been updated, so the current download differs; select version 10 in the dataset's version history to get the same file. `data/vehicles_slim.csv.gz` Keeps a subset of the columns.
