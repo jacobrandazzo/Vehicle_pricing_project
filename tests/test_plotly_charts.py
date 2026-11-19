@@ -1,4 +1,5 @@
-"""The Plotly charts mark the car, flag an unclear age effect, hover in dollars, and read on a phone."""
+"""The Plotly charts mark the car, flag an unclear age effect, hover in dollars, read on a
+phone, and use the dark "Ocean" style."""
 
 import plotly.graph_objects as go
 import pytest
@@ -118,3 +119,44 @@ def test_residuals_figure_returns_a_figure(camry_listings, camry_model, curves):
 
     assert isinstance(fig, go.Figure)
     assert len(fig.data) >= 3  # residual dots and the band's two edges
+
+
+# The "Ocean" style for the dark website. The hex values are written out, not
+# imported, so changing a colour constant by accident fails here.
+CORAL = "#ff4b4b"
+OCEAN_SCALE = [(0, "#2b4a7a"), (1 / 3, "#3f7cc0"), (2 / 3, "#6bb3f0"), (1, "#bfe3ff")]
+
+
+def test_backgrounds_are_transparent(camry_listings, camry_model, curves):
+    figures = [mileage_figure(camry_listings, curves), age_figure(camry_listings, curves),
+               residuals_figure(camry_listings, camry_model, curves)]
+
+    for fig in figures:
+        assert fig.layout.paper_bgcolor == "rgba(0, 0, 0, 0)"  # the page shows through
+        assert fig.layout.plot_bgcolor == "rgba(0, 0, 0, 0)"
+
+
+@FIGURES
+def test_model_years_use_the_ocean_scale(make_figure, camry_listings, curves):
+    scale = make_figure(camry_listings, curves).layout.coloraxis.colorscale
+
+    assert [tuple(stop) for stop in scale] == OCEAN_SCALE  # deep blue (oldest) to pale (newest)
+
+
+@FIGURES
+def test_curve_is_coral(make_figure, camry_listings, curves):
+    fig = make_figure(camry_listings, curves)
+
+    curve = [t for t in fig.data if t.meta in ("mileage curve", "age curve")]
+    legend_lines = [t for t in fig.data  # legend-only entries: one point at None
+                    if t.mode == "lines" and len(t.x) == 1 and t.x[0] is None]
+    assert curve and legend_lines
+    assert all(trace.line.color == CORAL for trace in curve + legend_lines)
+
+
+@FIGURES
+def test_car_marker_is_white(make_figure, camry_listings, curves):
+    (car,) = _traces(make_figure(camry_listings, curves), "car")
+
+    assert car.marker.color == "#ffffff"  # black would vanish on the dark page
+    assert car.error_y.color == "#ffffff"
