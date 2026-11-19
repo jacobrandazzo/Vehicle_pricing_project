@@ -1,0 +1,6 @@
+# The site is always dark: the Plotly charts (src/vehicle_pricing/plotly_charts.py)
+# are designed for a dark page, with transparent backgrounds and light text, so
+# they would be hard to read on a light one. With only [theme] set, visitors
+# can't switch to light. The colours are Streamlit's own dark theme.
+[theme]
+base = "dark"

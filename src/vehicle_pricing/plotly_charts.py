@@ -8,6 +8,10 @@ listing; the median and 95% range for a curve point and for the car.
 Price vs. mileage and price vs. model year are two separate one-panel
 figures, so a page can put them side by side or stack them on a phone.
 
+The colours are their own: the "Ocean" style, made for the website's dark
+page (transparent backgrounds, light text, a blue model-year ramp, a coral
+curve). The matplotlib charts and the docs images keep the colours in plots.py.
+
 This module only builds figures; it doesn't display them.
 """
 
@@ -17,9 +21,6 @@ import plotly.graph_objects as go
 
 from vehicle_pricing.model import DepreciationCurves, FittedModel
 from vehicle_pricing.plots import (
-    ATYPICAL_BAND_ALPHA,
-    BAND_ALPHA,
-    CURVE_COLOR,
     DASHED_NOTE,
     _age_curve_label,
     _age_note,
@@ -33,12 +34,28 @@ from vehicle_pricing.plots import (
     _year_jitter,
 )
 
-BAND_RGB = "214, 39, 40"  # matplotlib's "tab:red", the band colour in plots.py
-RESIDUAL_BAND = "rgba(139, 0, 0, 0.15)"  # "darkred" at 15%, as in plots.plot_residuals
-YEAR_COLORSCALE = "Viridis"  # the same colour map as plots.YEAR_COLORMAP
-MID_YEAR_COLOR = "#21918c"  # viridis' middle colour, for the highlighted dots' legend entry
-FADED_DOTS = {"color": "grey", "opacity": 0.25, "size": 5}
+# "Ocean" colours, for a dark page (Streamlit's dark background is about #171614).
+PAGE_COLOR = "#171614"  # the page behind the charts; used for rings around light marks
+TRANSPARENT = "rgba(0, 0, 0, 0)"
+TEXT_COLOR = "#edebe8"  # titles, axis titles, legend
+TICK_COLOR = "#a8a6a0"  # tick labels: a step quieter than the text
+GRID_COLOR = "rgba(237, 235, 232, 0.10)"  # horizontal gridlines, barely there
+CURVE_COLOR = "#ff4b4b"  # coral, the site's accent colour
+BAND_RGB = "255, 75, 75"  # the same coral, for the bands' rgba()
+BAND_ALPHA = 0.15
+ATYPICAL_BAND_ALPHA = 0.06  # lighter where few real cars are like the curve's point
+RESIDUAL_BAND = f"rgba({BAND_RGB}, {BAND_ALPHA})"
+# Model-year scale, oldest (deep blue) to newest (pale blue): newer cars stand out on dark.
+YEAR_COLORSCALE = [[0, "#2b4a7a"], [1 / 3, "#3f7cc0"], [2 / 3, "#6bb3f0"], [1, "#bfe3ff"]]
+MID_YEAR_COLOR = "#5598d8"  # the scale's middle (halfway from #3f7cc0 to #6bb3f0), for the legend
+FADED_DOTS = {"color": TICK_COLOR, "opacity": 0.35, "size": 5}
 HIGHLIGHT_DOTS = {"size": 6}
+CAR_COLOR = "#ffffff"  # white: black would vanish on the dark page
+# One dark box with light text. Every hover names its trace on the first line and
+# leaves <extra></extra> empty: Plotly's side box takes the trace's colour, unreadable here.
+HOVER_LABEL = {"bgcolor": "#262522", "bordercolor": TICK_COLOR, "font": {"color": TEXT_COLOR}}
+NOTE_BOX = {"bgcolor": "rgba(38, 37, 34, 0.9)", "bordercolor": TICK_COLOR,
+            "font": {"color": TEXT_COLOR}}
 DEFAULT_HEIGHT = 560  # the residuals chart
 # Mileage and age charts: one panel each, readable from a phone (360px) up. Their
 # colour bar and legend sit below the x-axis title, in a bottom margin of fixed size.
@@ -76,9 +93,9 @@ def mileage_figure(
     _add_listings(fig, listings["odometer"], listings["price"], years, near_year,
                   np.column_stack([listings["odometer"], years]), LISTING_HOVER)
     mileage = curves.mileage_curve.to_frame()
-    hover = ("Median: %{y:$,.0f}<br>" + level
+    hover = ("Mileage curve<br>Median: %{y:$,.0f}<br>" + level
              + " range: %{customdata[0]:$,.0f}–%{customdata[1]:$,.0f}"
-             + "<br>Mileage: %{x:,.0f} miles<extra>Mileage curve</extra>")
+             + "<br>Mileage: %{x:,.0f} miles<extra></extra>")
     atypical = _add_curve(fig, mileage["odometer"], mileage,
                           mileage[["lower", "upper"]].to_numpy(), hover, meta="mileage curve")
     if car.price is not None:
@@ -114,10 +131,10 @@ def age_figure(
                   np.column_stack([listings["odometer"], years, listings["age"]]),
                   LISTING_HOVER_WITH_AGE)
     ages = curves.age_curve.to_frame()
-    hover = ("Median: %{y:$,.0f}<br>" + level
+    hover = ("Age curve<br>Median: %{y:$,.0f}<br>" + level
              + " range: %{customdata[0]:$,.0f}–%{customdata[1]:$,.0f}"
              + "<br>Model year: %{x:.1f}<br>Age: %{customdata[2]:.1f} years"
-             + "<extra>Age curve</extra>")
+             + "<extra></extra>")
     atypical = _add_curve(fig, ages["model_year"], ages,
                           ages[["lower", "upper", "age"]].to_numpy(), hover, meta="age curve",
                           dashed_everywhere=not curves.age_effect_clear)
@@ -126,7 +143,7 @@ def age_figure(
             text=_age_note(curves).replace(" (t =", "<br>(t ="),  # two lines: fits at 360px
             xref="x domain", yref="y domain", x=0.5, y=0.98,
             xanchor="center", yanchor="top", showarrow=False,
-            bgcolor="lightyellow", bordercolor="grey", borderwidth=1,
+            borderwidth=1, **NOTE_BOX,
         )
     if car.price is not None:
         _add_car(fig, curves, car.model_year)
@@ -156,7 +173,7 @@ def residuals_figure(
     fig = go.Figure()
     fig.add_trace(go.Scatter(
         x=listings["odometer"], y=_residuals(listings, model), mode="markers",
-        marker={"color": "grey", "opacity": 0.35, "size": 5}, showlegend=False,
+        marker=FADED_DOTS, showlegend=False,
         customdata=np.column_stack([listings["price"], listings["year"]]),
         hovertemplate=("Residual: %{y:$,.0f}<br>Price: %{customdata[0]:$,.0f}"
                        "<br>Mileage: %{x:,.0f} miles<br>Model year: %{customdata[1]}"
@@ -173,10 +190,11 @@ def residuals_figure(
     ))
     fig.add_hline(y=0, line={"color": CURVE_COLOR, "width": 1})
     fig.update_layout(
-        title={"text": title, "x": 0.5}, template="plotly_white", height=DEFAULT_HEIGHT,
+        title={"text": title, "x": 0.5}, height=DEFAULT_HEIGHT,
         legend={"x": 0.99, "xanchor": "right", "y": 0.99, "yanchor": "top",
-                "bgcolor": "rgba(255, 255, 255, 0.85)"},
+                "bgcolor": "rgba(23, 22, 20, 0.85)"},  # the page colour, so dots under it dim
     )
+    _dark_layout(fig)
     fig.update_xaxes(title_text="Odometer (miles)", tickformat=",.0f")
     fig.update_yaxes(title_text="Residual", tickformat="$,.0f")
     return fig
@@ -196,6 +214,24 @@ def _below_axis(pixels: float) -> float:
     return -pixels / (FIGURE_HEIGHT - MARGIN["t"] - MARGIN["b"])
 
 
+def _dark_layout(fig: go.Figure) -> None:
+    """Transparent backgrounds, light text and faint horizontal gridlines, for the dark page.
+
+    With no template the page shows through: paper_bgcolor is behind the whole
+    figure (title, legend, margins), plot_bgcolor behind the plotting area.
+    """
+    fig.update_layout(
+        template="none", paper_bgcolor=TRANSPARENT, plot_bgcolor=TRANSPARENT,
+        font={"color": TEXT_COLOR}, hoverlabel=HOVER_LABEL,
+    )
+    # automargin: grow the margins to fit the tick labels (template "none" leaves it off).
+    axis = {"tickfont": {"color": TICK_COLOR}, "showline": False, "zeroline": False,
+            "ticks": "", "automargin": True}
+    # Fixed gaps below the x-axis: numbers clear of the axis (and of "$0"), title close to them.
+    fig.update_xaxes(showgrid=False, ticklabelstandoff=6, title_standoff=8, **axis)
+    fig.update_yaxes(showgrid=True, gridcolor=GRID_COLOR, gridwidth=1, **axis)
+
+
 def _finish_layout(fig: go.Figure, listings: pd.DataFrame, title: str) -> None:
     """Short title; colour bar and legend under the x-axis title, so nothing covers the dots.
 
@@ -205,7 +241,6 @@ def _finish_layout(fig: go.Figure, listings: pd.DataFrame, title: str) -> None:
     years = listings["year"]
     fig.update_layout(
         title={"text": title, "x": 0.5, "xanchor": "center"},
-        template="plotly_white",
         height=FIGURE_HEIGHT,
         margin=MARGIN,
         hovermode="closest",
@@ -218,8 +253,9 @@ def _finish_layout(fig: go.Figure, listings: pd.DataFrame, title: str) -> None:
         # the filled bands). Long entries are wrapped by _legend_text.
         legend={"orientation": "v", "x": 0, "xanchor": "left",
                 "y": _below_axis(LEGEND_GAP), "yanchor": "top", "traceorder": "normal",
-                "font": {"size": 11}, "bgcolor": "rgba(0, 0, 0, 0)"},
+                "font": {"size": 11}, "bgcolor": TRANSPARENT},
     )
+    _dark_layout(fig)
     fig.update_yaxes(title_text="Price", tickformat="$,.0f", rangemode="tozero")
 
 
@@ -229,13 +265,13 @@ def _legend_text(label: str) -> str:
 
 
 def _add_car(fig, curves, x):
-    """The car: a black dot at its estimated price, with its 95% range as an error bar."""
+    """The car: a white dot with a dark ring at its estimated price, its 95% range as an error bar."""
     car = curves.car
     fig.add_trace(go.Scatter(
         x=[x], y=[car.price], mode="markers", name=_legend_text(_car_label(curves)), meta="car",
-        marker={"color": "black", "size": 10, "line": {"color": "white", "width": 1.5}},
+        marker={"color": CAR_COLOR, "size": 10, "line": {"color": PAGE_COLOR, "width": 1.5}},
         error_y={"type": "data", "symmetric": False, "array": [car.upper - car.price],
-                 "arrayminus": [car.price - car.lower], "color": "black",
+                 "arrayminus": [car.price - car.lower], "color": CAR_COLOR,
                  "thickness": 1.5, "width": 5},
         hovertemplate=(f"This car<br>Price: ${car.price:,.0f}<br>{1 - curves.alpha:.0%} range: "
                        f"${car.lower:,.0f}–${car.upper:,.0f}<extra></extra>"),
@@ -249,13 +285,13 @@ def _add_listings(fig, x, y, years, highlight, customdata, hover):
     fig.add_trace(go.Scatter(
         x=x[faded], y=y[faded], mode="markers", marker=FADED_DOTS,
         name="Other listings (faded)", customdata=customdata[faded],
-        hovertemplate=hover + "<extra>Other listing</extra>",
+        hovertemplate="Other listing<br>" + hover + "<extra></extra>",
         legendrank=2,
     ))
     fig.add_trace(go.Scatter(
         x=x[shown], y=y[shown], mode="markers", showlegend=False,
         marker={**HIGHLIGHT_DOTS, "color": years[shown], "coloraxis": "coloraxis"},
-        customdata=customdata[shown], hovertemplate=hover + "<extra>Listing</extra>",
+        customdata=customdata[shown], hovertemplate="Listing<br>" + hover + "<extra></extra>",
     ))
 
 

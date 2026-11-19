@@ -200,7 +200,9 @@ def show_charts(est: Estimate) -> None:
     """The mileage and age charts under one title, and the residuals chart in a collapsed expander.
 
     Only the latest answer gets charts: they are the heavy part of a rerun.
-    theme=None keeps each figure's own colours instead of Streamlit's restyling.
+    theme="streamlit" gives the charts the site's font and text colours; the
+    figures' own colours (transparent backgrounds, the model-year scale, the
+    coral curve) are set explicitly, so they win over Streamlit's defaults.
     """
     title = " ".join(part for part in (est.query.manufacturer, est.query.model) if part).title()
     # The long title sits above the charts, not inside them, so a narrow chart never clips it.
@@ -210,13 +212,13 @@ def show_charts(est: Estimate) -> None:
     with mileage_col:
         st.plotly_chart(
             mileage_figure(est.listings, est.curves, title=title),
-            theme=None, width="stretch",
+            theme="streamlit", width="stretch",
             alt=f"Price against mileage for {title}, with the car marked",
         )
     with age_col:
         st.plotly_chart(
             age_figure(est.listings, est.curves, title=title),
-            theme=None, width="stretch",
+            theme="streamlit", width="stretch",
             alt=f"Price against model year for {title}, with the car marked",
         )
 
@@ -234,7 +236,7 @@ def show_charts(est: Estimate) -> None:
             st.plotly_chart(
                 residuals_figure(est.listings, est.model, est.curves,
                                  title=f"{title}: residuals vs. odometer"),
-                theme=None,
+                theme="streamlit",
                 alt=f"Residuals against odometer for {title}, with the 95% range shaded",
             )
 
